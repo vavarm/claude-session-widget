@@ -4,6 +4,7 @@ mod agents;
 mod focus;
 mod hook;
 mod info;
+mod limit;
 mod notify;
 mod quota;
 mod sessions;

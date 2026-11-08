@@ -86,6 +86,14 @@ test("quotaView shows a reset note only for windows at the limit", () => {
   assert.deepEqual(view.notes, ["5h limit: resets in 1h00"]);
 });
 
+test("quotaView says when old figures were read, and stays silent for current ones", () => {
+  const window = { usedPercentage: 40, resetsAt: 100_000 };
+  const old = quotaView({ fiveHour: window, asOf: 1_000_000 }, 1000 + 20 * 60);
+  assert.match(old.notes[0], /^usage as of \d/);
+  assert.deepEqual(quotaView({ fiveHour: window, asOf: 1_000_000 }, 1000 + 5 * 60).notes, []);
+  assert.deepEqual(quotaView({ fiveHour: window, asOf: null }, 5000).notes, []);
+});
+
 test("quotaView copes with missing windows and absent quotas", () => {
   assert.deepEqual(quotaView(null), { bars: [], notes: [] });
   assert.equal(quotaView({ sevenDay: { usedPercentage: 150, resetsAt: 5000 } }, 1000).bars[0].percent, 100);

@@ -95,7 +95,8 @@ Claude Code only hands this data to commands configured in its settings, so enab
 
 - An existing `statusLine` or `subagentStatusLine` is never replaced. If you already have one, the option is refused and the widget says so.
 - Turning an option off, and uninstalling, remove the entry again. The other settings in the file are left as they are.
-- The data is only as fresh as Claude Code's last refresh: quotas follow your session activity, and agent lines disappear after 30 seconds without an update. Nothing is shown if Claude Code does not report limits for your account.
+- The `statusLine` command is known to run in terminal sessions; the VS Code extension and the desktop app may not run it. Quotas therefore have three sources, the newest one winning for each window: the status line, the usage Claude Code last cached in `~/.claude.json`, and any limit Claude Code reported as exceeded in a recent transcript (shown as fully used, with its reset time). Figures older than 15 minutes carry an "usage as of HH:MM" line, and windows that have already reset are dropped. The cache is only refreshed now and then, so without a terminal session the bars can lag behind.
+- Agent lines disappear after 30 seconds without an update. Nothing is shown if Claude Code reports no limits for your account.
 - Which kinds of background work appear in the agent list depends on what Claude Code puts in its agent panel; the widget shows every running entry it receives.
 
 **Notifications** (tray menu only) can be switched on separately for a session that needs you, a session that finishes (busy to idle), and a quota reaching 90 % (once per reset period; it needs the usage option above). They are system notifications and never replay what was already true when you turn them on. Whether "needs you" ever fires depends on the status values Claude Code writes, of which only `busy` and `idle` have been observed.

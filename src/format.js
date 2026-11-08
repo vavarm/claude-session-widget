@@ -87,6 +87,7 @@ export function infoTitle(info) {
 }
 
 export const LIMIT_PERCENT = 90;
+export const STALE_QUOTA_MS = 15 * 60 * 1000;
 export const QUOTA_BARS_HEIGHT = 26;
 export const NOTE_HEIGHT = 15;
 
@@ -111,6 +112,10 @@ export function quotaView(quotas, now = Date.now() / 1000) {
     const limit = percent >= LIMIT_PERCENT;
     bars.push({ name, percent, limit });
     if (limit) notes.push(`${name} limit: resets in ${untilReset(window.resetsAt, now)}`);
+  }
+  if (bars.length && quotas.asOf && now * 1000 - quotas.asOf > STALE_QUOTA_MS) {
+    const time = new Date(quotas.asOf).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    notes.push(`usage as of ${time}`);
   }
   return { bars, notes };
 }

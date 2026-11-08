@@ -1,5 +1,5 @@
 use crate::{
-    quota::{Quotas, Window},
+    quota::{Quotas, Window, STALE_MS},
     sessions::{Kind, Session},
 };
 use std::collections::{HashMap, HashSet};
@@ -45,6 +45,9 @@ impl Watcher {
     // One message per window and per reset period.
     pub fn quotas(&mut self, quotas: &Quotas, now: i64) -> Vec<String> {
         let mut messages = Vec::new();
+        if quotas.as_of.is_some_and(|at| now * 1000 - at > STALE_MS) {
+            return messages;
+        }
         for (name, window) in [("5h", &quotas.five_hour), ("7d", &quotas.seven_day)] {
             let Some(Window {
                 used_percentage,
@@ -148,6 +151,7 @@ mod tests {
         Quotas {
             five_hour: window(five),
             seven_day: window(seven),
+            as_of: None,
         }
     }
 
@@ -159,6 +163,15 @@ mod tests {
         assert_eq!(first, vec!["5h usage at 92 %, resets in 1h07".to_string()]);
         assert!(watcher.quotas(&quotas(95.0, 10.0, 5000), 1100).is_empty());
         assert_eq!(watcher.quotas(&quotas(91.0, 10.0, 9000), 6000).len(), 1);
+    }
+
+    #[test]
+    fn stale_figures_never_raise_an_alert() {
+        let mut watcher = Watcher::default();
+        let mut stale = quotas(95.0, 10.0, 5000);
+        stale.as_of = Some(0);
+        assert!(watcher.quotas(&stale, 1000).is_empty());
+        assert_eq!(watcher.quotas(&quotas(95.0, 10.0, 5000), 1000).len(), 1);
     }
 
     #[test]

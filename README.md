@@ -13,7 +13,7 @@ A small always-on-top widget that shows your running [Claude Code](https://claud
 - Optional agents and background tasks: the running ones are listed under their session.
 - Optional notifications when a session needs you or finishes.
 - Optional layout helpers: fold sessions idle for an hour, collapse to the header while nothing runs, and a global show/hide shortcut.
-- Reads the session files Claude Code already writes, and makes no network access. Only the two options above touch your Claude Code setup, and only if you turn them on (see [Optional features](#optional-features)).
+- Reads the session files Claude Code already writes, and makes no network access. Only the two options below touch your Claude Code setup, and only if you turn them on (see [Optional features](#optional-features)).
 - Windows, macOS and Linux (see [platform status](#platform-status)).
 
 Unofficial project, not affiliated with Anthropic.
@@ -96,10 +96,10 @@ Claude Code only hands this data to commands configured in its settings, so enab
 - An existing `statusLine` or `subagentStatusLine` is never replaced. If you already have one, the option is refused and the widget says so.
 - Turning an option off, and uninstalling, remove the entry again. The other settings in the file are left as they are.
 - The `statusLine` command is known to run in terminal sessions; the VS Code extension and the desktop app do not appear to run it, so their sessions have no context bar.
-- Agent lines disappear after 30 seconds without an update. Nothing is shown if Claude Code reports no limits for your account.
+- Agent lines disappear after 30 seconds without an update.
 - Which kinds of background work appear in the agent list depends on what Claude Code puts in its agent panel; the widget shows every running entry it receives.
 
-**Notifications** (tray menu only) can be switched on separately for a session that needs you, a session that finishes (busy to idle). They are system notifications and never replay what was already true when you turn them on. Whether "needs you" ever fires depends on the status values Claude Code writes, of which only `busy` and `idle` have been observed.
+**Notifications** (tray menu only) can be switched on separately for a session that needs you and for a session that finishes (busy to idle). They are system notifications and never replay what was already true when you turn them on. Whether "needs you" ever fires depends on the status values Claude Code writes, of which only `busy` and `idle` have been observed.
 
 ## Configuration
 

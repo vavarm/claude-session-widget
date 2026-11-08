@@ -29,6 +29,7 @@ if [ ! -f "$INSTALL_DIR/$BIN_NAME" ]; then
 fi
 
 stop_widget "$INSTALL_DIR"
+"$INSTALL_DIR/$BIN_NAME" --remove-hooks >/dev/null || true
 
 # Autostart entries are written by the app itself, so match them by the path they launch.
 for entry in "${XDG_CONFIG_HOME:-$HOME/.config}"/autostart/*.desktop "$HOME"/Library/LaunchAgents/*.plist; do

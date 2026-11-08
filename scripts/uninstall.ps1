@@ -25,6 +25,7 @@ if (-not (Test-Path $exe)) {
 }
 
 Stop-Widget $InstallDir
+& $exe --remove-hooks | Out-Null
 Remove-Autostart $InstallDir
 
 $link = Join-Path $StartMenuDir 'Claude Session Widget.lnk'

@@ -7,7 +7,10 @@ A small always-on-top widget that shows your running [Claude Code](https://claud
 - One row per live session: name, project folder, state, time spent in that state.
 - Sessions that need you come first. The tray icon takes the colour of the most urgent one.
 - Tray icon and menu: show/hide, always on top, compact mode, opacity, start at login.
-- Reads the session files Claude Code already writes. No hooks, no changes to your Claude Code setup, no network access.
+- Placement: lock the position, exact position in pixels (nudge buttons), click-through.
+- Optional usage quotas: 5-hour and weekly bars, with the reset time once a window is nearly used up.
+- Optional agents and background tasks: the running ones are listed under their session.
+- Reads the session files Claude Code already writes, and makes no network access. Only the two options above touch your Claude Code setup, and only if you turn them on (see [Optional features](#optional-features)).
 - Windows, macOS and Linux (see [platform status](#platform-status)).
 
 Unofficial project, not affiliated with Anthropic.
@@ -50,7 +53,7 @@ The first build compiles all dependencies and takes several minutes. The new bui
 | Installed to | `%LOCALAPPDATA%\ClaudeSessionWidget\app` | `~/.local/share/ClaudeSessionWidget/app` (Linux), `~/Library/Application Support/ClaudeSessionWidget/app` (macOS) |
 | Launcher | Start Menu shortcut | Desktop entry (Linux only) |
 
-Options: `-InstallDir`, `-StartMenuDir`, `-Autostart`, `-NoLaunch` on Windows; `--install-dir`, `--no-launch` on Linux and macOS (use the tray menu for start at login there).
+Options: `-InstallDir`, `-StartMenuDir`, `-Autostart`, `-Quotas`, `-Agents`, `-NoLaunch` on Windows; `--install-dir`, `--quotas`, `--agents`, `--no-launch` on Linux and macOS (use the tray menu for start at login there).
 
 **Update** with `scripts/update.sh` or `scripts\update.ps1`: it runs `git pull --ff-only`, then reinstalls. Settings and the start-at-login choice are kept.
 
@@ -64,6 +67,26 @@ Options: `-InstallDir`, `-StartMenuDir`, `-Autostart`, `-NoLaunch` on Windows; `
 
 Only one instance runs at a time.
 
+Placement options in the tray menu:
+
+- **Lock position** disables dragging.
+- **Click-through** lets mouse clicks pass through the widget to the window below. The widget then cannot be right-clicked: use the tray icon to change settings or turn it off again.
+- **Position** shows the current coordinates and moves the widget by 1 or 10 screen pixels in any direction. The position is saved after every move; **Reset position** returns to the top-right corner.
+
+## Optional features
+
+Both are off by default. Enable them from the tray menu or at install time.
+
+- **Show usage quotas** (`-Quotas` / `--quotas`) adds two thin bars for the 5-hour and weekly limits. When a window reaches 90 %, a line under the bars says when it resets.
+- **Show agents and background tasks** (`-Agents` / `--agents`) lists the running subagents and background tasks under their session (up to three lines, the rest folded into "+N more"). In compact mode a small counter replaces the lines.
+
+Claude Code only hands this data to commands configured in its settings, so enabling an option registers the widget itself in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`): `ClaudeSessionWidget --statusline` as the `statusLine` for quotas, `ClaudeSessionWidget --subagent-status` as the `subagentStatusLine` for agents. These commands print nothing and write what they receive to the data folder; the widget makes no network request. Notes:
+
+- An existing `statusLine` or `subagentStatusLine` is never replaced. If you already have one, the option is refused and the widget says so.
+- Turning an option off, and uninstalling, remove the entry again. The other settings in the file are left as they are.
+- The data is only as fresh as Claude Code's last refresh: quotas follow your session activity, and agent lines disappear after 30 seconds without an update. Nothing is shown if Claude Code does not report limits for your account.
+- Which kinds of background work appear in the agent list depends on what Claude Code puts in its agent panel; the widget shows every running entry it receives.
+
 ## Configuration
 
 Everything is set from the menu and stored in `settings.json` in the data folder:
@@ -74,7 +97,7 @@ Everything is set from the menu and stored in `settings.json` in the data folder
 | Linux | `~/.config/ClaudeSessionWidget` |
 | macOS | `~/Library/Application Support/ClaudeSessionWidget` |
 
-Two environment variables override locations, mostly for tests: `CLAUDE_WIDGET_SESSIONS_DIR` (default `~/.claude/sessions`) and `CLAUDE_WIDGET_DATA_DIR`.
+Environment variables override locations, mostly for tests: `CLAUDE_WIDGET_SESSIONS_DIR` (default `~/.claude/sessions`), `CLAUDE_WIDGET_DATA_DIR`, and `CLAUDE_CONFIG_DIR` (the Claude Code configuration folder, default `~/.claude`).
 
 ## How it works
 

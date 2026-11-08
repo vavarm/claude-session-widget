@@ -60,11 +60,11 @@ function Find-Window($procId) {
 
 function Get-Rect($hwnd) { $r = New-Object Win+RECT; [void][Win]::GetWindowRect($hwnd, [ref]$r); $r }
 function Win-Height($hwnd) { $r = Get-Rect $hwnd; $r.B - $r.T }
-function Expected-Height($hwnd, $rows, $compact = $false) {
+function Expected-Height($hwnd, $rows, $compact = $false, $extra = 0) {
     $row = if ($compact) { 28 } else { 46 }
-    (34 + [Math]::Max($rows, 1) * $row + 8) * [Win]::GetDpiForWindow($hwnd) / 96.0
+    (34 + [Math]::Max($rows, 1) * $row + $extra + 8) * [Win]::GetDpiForWindow($hwnd) / 96.0
 }
-function Height-Is($hwnd, $rows, $compact = $false) { [Math]::Abs((Win-Height $hwnd) - (Expected-Height $hwnd $rows $compact)) -le 2 }
+function Height-Is($hwnd, $rows, $compact = $false, $extra = 0) { [Math]::Abs((Win-Height $hwnd) - (Expected-Height $hwnd $rows $compact $extra)) -le 2 }
 
 # --- DevTools protocol client -------------------------------------------------------------
 $script:cdpId = 0
@@ -106,7 +106,7 @@ function Click-Menu([string]$id) {
 function New-Dummy { Start-Process powershell -ArgumentList '-NoProfile', '-Command', 'Start-Sleep 600' -WindowStyle Hidden -PassThru }
 
 function Write-Session($dir, $pidValue, $startFileTime, $status, $name) {
-    $json = @{ pid = $pidValue; procStart = [string]$startFileTime; cwd = "C:\work\$name"
+    $json = @{ pid = $pidValue; sessionId = "sess-$name"; procStart = [string]$startFileTime; cwd = "C:\work\$name"
                name = $name; status = $status; statusUpdatedAt = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText((Join-Path $dir "$pidValue.json"), $json, (New-Object Text.UTF8Encoding $false))
 }
@@ -150,6 +150,7 @@ try {
 
     $env:CLAUDE_WIDGET_SESSIONS_DIR = $sessions
     $env:CLAUDE_WIDGET_DATA_DIR = $appdata
+    $env:CLAUDE_CONFIG_DIR = Join-Path $work 'claude'
     $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $work 'webview'
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$port"
 
@@ -165,6 +166,41 @@ try {
     Check 'menu: compact toggles back' ((Click-Menu 'compact') -and (Wait-Until { -not (Page-State).compact }) -and (Wait-Until { Height-Is $hwnd 3 }) -and -not (Read-Settings).Compact)
     Check 'menu: opacity 60 %' ((Click-Menu 'opacity_60') -and (Wait-Until { [Math]::Abs((Read-Settings).Opacity - 0.6) -lt 0.01 }) -and (Wait-Until { (Cdp-Eval "document.getElementById('card').style.getPropertyValue('--opacity')") -eq '0.6' }))
     Check 'menu: always-on-top off' ((Click-Menu 'top') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 8) -eq 0 }) -and -not (Read-Settings).AlwaysOnTop)
+
+    $now = [DateTimeOffset]::Now.ToUnixTimeSeconds()
+    $status = @{ rate_limits = @{ five_hour = @{ used_percentage = 96.2; resets_at = $now + 1800 }; seven_day = @{ used_percentage = 40; resets_at = $now + 86400 } } } | ConvertTo-Json -Compress -Depth 4
+    # PowerShell does not feed a pipe to a GUI-subsystem executable, so stdin comes from a file.
+    $statusFile = Join-Path $work 'status.json'
+    [IO.File]::WriteAllText($statusFile, $status)
+    Start-Process $exe -ArgumentList '--statusline' -RedirectStandardInput $statusFile -Wait -WindowStyle Hidden
+    Check 'status line helper stores the quotas' ((Test-Path (Join-Path $appdata 'usage.json')) -and (Get-Content (Join-Path $appdata 'usage.json') -Raw) -match '"fiveHour"')
+    Check 'quotas stay hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.quota').length") -eq 0)
+    $extra = 26 + 15
+    Check 'menu: quotas on shows both bars and the reset of the exhausted one' ((Click-Menu 'quotas') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.quota').length") -eq 2 }) -and (Wait-Until { (Cdp-Eval "document.querySelector('.note')?.textContent") -match '^5h limit: resets in (29|30)m$' }) -and (Wait-Until { Height-Is $hwnd 3 $false $extra }) -and (Read-Settings).ShowQuotas) "got $(Win-Height $hwnd)"
+    Check 'quotas turn on the Claude Code status line' ((Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -match 'ClaudeSessionWidget.*--statusline')
+    Check 'menu: quotas off hides them and removes the status line' ((Click-Menu 'quotas') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.quota').length") -eq 0 }) -and (Wait-Until { Height-Is $hwnd 3 }) -and (Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -notmatch 'statusLine')
+
+    $started = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() - 90000
+    $tasks = @{ session_id = 'sess-bravo'; tasks = @(
+        @{ id = 't1'; type = 'local_agent'; agentType = 'Explore'; status = 'running'; description = 'Find the auth code'; startTime = $started },
+        @{ id = 't2'; type = 'local_bash'; status = 'running'; description = 'npm test'; startTime = $started + 1000 },
+        @{ id = 't3'; type = 'local_agent'; status = 'completed'; description = 'Done already'; startTime = $started }) } | ConvertTo-Json -Compress -Depth 5
+    $tasksFile = Join-Path $work 'tasks.json'
+    [IO.File]::WriteAllText($tasksFile, $tasks)
+    Start-Process $exe -ArgumentList '--subagent-status' -RedirectStandardInput $tasksFile -Wait -WindowStyle Hidden
+    Check 'agents stay hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.agent').length") -eq 0)
+    Check 'menu: agents on lists the running agent and background task' ((Click-Menu 'agents') -and (Wait-Until { (Cdp-Eval "[...document.querySelectorAll('.agent span:first-child')].map(e => e.textContent).join('|')") -eq 'Explore: Find the auth code|npm test' }) -and (Wait-Until { Height-Is $hwnd 3 $false 32 }) -and (Read-Settings).ShowAgents) "got $(Win-Height $hwnd)"
+    Check 'agents register the subagent status line' ((Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -match 'subagentStatusLine')
+    Check 'menu: compact mode hides agent lines but keeps a count' ((Click-Menu 'compact') -and (Wait-Until { Height-Is $hwnd 3 $true }) -and (Wait-Until { (Cdp-Eval "document.querySelector('.badge')?.textContent") -eq '2' })) "got $(Win-Height $hwnd)"
+    [void](Click-Menu 'compact')
+    Check 'menu: agents off hides them and removes the subagent status line' ((Click-Menu 'agents') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.agent').length") -eq 0 }) -and (Wait-Until { Height-Is $hwnd 3 }) -and (Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -notmatch 'subagentStatusLine')
+
+    Check 'menu: lock position is saved and reaches the page' ((Click-Menu 'locked') -and (Wait-Until { (Read-Settings).Locked }))
+    [void](Click-Menu 'locked')
+    Check 'menu: click-through lets mouse events pass' ((Click-Menu 'click_through') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 0x20) -ne 0 }) -and (Read-Settings).ClickThrough)
+    Check 'menu: click-through off' ((Click-Menu 'click_through') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 0x20) -eq 0 }))
+    $before = Get-Rect $hwnd
+    Check 'menu: nudge moves by exact pixels and saves' ((Click-Menu 'nudge_10_-1') -and (Wait-Until { $r = Get-Rect $hwnd; $r.L -eq $before.L + 10 -and $r.T -eq $before.T - 1 }) -and (Wait-Until { $s = Read-Settings; $s.X -eq $before.L + 10 -and $s.Y -eq $before.T - 1 })) "from $($before.L),$($before.T)"
 
     Stop-Process $b -Force
     Check 'killed process removes its row' ((Wait-Until { (Page-State).rows.Count -eq 2 } 10) -and (Wait-Until { Height-Is $hwnd 2 })) "got $(Win-Height $hwnd)"

@@ -1,6 +1,26 @@
 export const HEADER_HEIGHT = 34;
 export const FOOTER_HEIGHT = 8;
-export const rowHeight = (compact) => (compact ? 28 : 46);
+export const AGENT_LINE_HEIGHT = 16;
+export const MAX_AGENT_LINES = 3;
+
+export const rowHeight = (compact, agentLines = 0) => (compact ? 28 : 46 + agentLines * AGENT_LINE_HEIGHT);
+
+// One line per running agent or background task, with the rest folded into a last line.
+export function agentLines(agents, now = Date.now()) {
+  const text = (task) => {
+    const what = task.description || task.name || task.kind || "task";
+    return task.agentType ? `${task.agentType}: ${what}` : what;
+  };
+  if (agents.length <= MAX_AGENT_LINES) {
+    return agents.map((task) => ({ text: text(task), sinceMs: task.startTime }));
+  }
+  const shown = agents.slice(0, MAX_AGENT_LINES - 1).map((task) => ({ text: text(task), sinceMs: task.startTime }));
+  return [...shown, { text: `+${agents.length - shown.length} more`, sinceMs: null }];
+}
+
+export function rowLineCount(session, compact) {
+  return compact ? 0 : agentLines(session.agents ?? []).length;
+}
 
 export function elapsed(sinceMs, now = Date.now()) {
   const seconds = Math.max(Math.floor((now - sinceMs) / 1000), 0);
@@ -25,8 +45,45 @@ export function folderName(cwd) {
   return cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
 }
 
-export function windowHeight(sessionCount, compact) {
-  return HEADER_HEIGHT + Math.max(sessionCount, 1) * rowHeight(compact) + FOOTER_HEIGHT;
+export function windowHeight(sessions, compact, extra = 0) {
+  const rows = sessions.length
+    ? sessions.reduce((sum, s) => sum + rowHeight(compact, rowLineCount(s, compact)), 0)
+    : rowHeight(compact);
+  return HEADER_HEIGHT + rows + extra + FOOTER_HEIGHT;
+}
+
+export const LIMIT_PERCENT = 90;
+export const QUOTA_BARS_HEIGHT = 26;
+export const NOTE_HEIGHT = 15;
+
+export function untilReset(resetsAt, now = Date.now() / 1000) {
+  const minutes = Math.max(Math.ceil((resetsAt - now) / 60), 1);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${String(minutes % 60).padStart(2, "0")}`;
+  return `${Math.floor(hours / 24)}d${String(hours % 24).padStart(2, "0")}h`;
+}
+
+const QUOTA_WINDOWS = [["fiveHour", "5h"], ["sevenDay", "7d"]];
+
+// Bars for each known window; a window at the limit also gets a line saying when it resets.
+export function quotaView(quotas, now = Date.now() / 1000) {
+  const bars = [];
+  const notes = [];
+  for (const [key, name] of QUOTA_WINDOWS) {
+    const window = quotas?.[key];
+    if (!window) continue;
+    const percent = Math.min(Math.max(Math.round(window.usedPercentage), 0), 100);
+    const limit = percent >= LIMIT_PERCENT;
+    bars.push({ name, percent, limit });
+    if (limit) notes.push(`${name} limit: resets in ${untilReset(window.resetsAt, now)}`);
+  }
+  return { bars, notes };
+}
+
+export function extraHeight(view, notice) {
+  const lines = view.notes.length + (notice ? 1 : 0);
+  return (view.bars.length ? QUOTA_BARS_HEIGHT : 0) + lines * NOTE_HEIGHT;
 }
 
 export function escapeHtml(text) {

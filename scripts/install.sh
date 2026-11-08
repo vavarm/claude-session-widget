@@ -5,7 +5,11 @@
 # directory first, and the previous installation is only replaced once the build succeeded
 # (and restored if the copy fails). Settings are never touched.
 #
-# Usage: scripts/install.sh [--install-dir DIR] [--no-launch]
+# Usage: scripts/install.sh [--install-dir DIR] [--quotas] [--agents] [--no-launch]
+#
+# --quotas shows the 5-hour and weekly usage quotas, --agents the running agents and background
+# tasks. Both register the widget as a command in ~/.claude/settings.json (statusLine and
+# subagentStatusLine); an existing entry is never replaced.
 #
 # Autostart is not handled here: use "Start at login" in the widget's tray menu.
 set -euo pipefail
@@ -16,11 +20,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 LAUNCH=1
+OPTIONS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --install-dir) INSTALL_DIR="$2"; shift 2 ;;
+    --quotas) OPTIONS+=(quotas); shift ;;
+    --agents) OPTIONS+=(agents); shift ;;
     --no-launch) LAUNCH=0; shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -67,6 +74,12 @@ EOF
 fi
 
 echo "Installed Claude Session Widget to $INSTALL_DIR"
+
+for option in ${OPTIONS[@]+"${OPTIONS[@]}"}; do
+  if ! message="$("$INSTALL_DIR/$BIN_NAME" "--enable-$option")"; then
+    echo "Option '$option' was not enabled: $message" >&2
+  fi
+done
 
 if [ "$LAUNCH" = 1 ]; then
   nohup "$INSTALL_DIR/$BIN_NAME" >/dev/null 2>&1 &

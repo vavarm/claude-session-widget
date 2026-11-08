@@ -10,6 +10,7 @@ export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOM
 export HOME="$WORK/home"
 export CLAUDE_WIDGET_PLATFORM="${CLAUDE_WIDGET_PLATFORM:-linux}"
 export CLAUDE_WIDGET_DATA_DIR="$WORK/data"
+export CLAUDE_CONFIG_DIR="$WORK/claude"
 unset XDG_DATA_HOME XDG_CONFIG_HOME
 mkdir -p "$HOME" "$CLAUDE_WIDGET_DATA_DIR"
 APP="$WORK/inst/app"
@@ -36,6 +37,12 @@ check "re-install (update path) succeeds" $?
 [ ! -e "$APP/stale.txt" ]; check "re-install replaces old files" $?
 [ -f "$CLAUDE_WIDGET_DATA_DIR/settings.json" ]; check "re-install keeps settings" $?
 
+"$ROOT/scripts/install.sh" --install-dir "$APP" --no-launch --quotas --agents >"$WORK/quotas.log" 2>&1
+check "install --quotas succeeds" $?
+grep -q 'ClaudeSessionWidget.*--statusline' "$CLAUDE_CONFIG_DIR/settings.json"; check "install --quotas registers the status line" $?
+grep -q '"ShowQuotas": *true' "$CLAUDE_WIDGET_DATA_DIR/settings.json"; check "install --quotas turns the setting on" $?
+grep -q 'subagentStatusLine' "$CLAUDE_CONFIG_DIR/settings.json"; check "install --agents registers the subagent status line" $?
+
 mkdir -p "$WORK/not-an-install"; touch "$WORK/not-an-install/precious.txt"
 "$ROOT/scripts/uninstall.sh" --install-dir "$WORK/not-an-install" >/dev/null 2>&1
 [ $? -ne 0 ] && [ -f "$WORK/not-an-install/precious.txt" ]
@@ -47,6 +54,7 @@ echo "Exec=/usr/bin/other" > "$HOME/.config/autostart/other.desktop"
 "$ROOT/scripts/uninstall.sh" --install-dir "$APP" >/dev/null 2>&1
 check "uninstall succeeds" $?
 [ ! -e "$APP" ]; check "uninstall removes the files" $?
+! grep -qi statusLine "$CLAUDE_CONFIG_DIR/settings.json"; check "uninstall removes both status lines" $?
 [ ! -e "$HOME/.local/share/applications/claude-session-widget.desktop" ]; check "uninstall removes the launcher entry" $?
 [ ! -e "$HOME/.config/autostart/widget.desktop" ] && [ -e "$HOME/.config/autostart/other.desktop" ]
 check "uninstall removes only its own autostart entry" $?

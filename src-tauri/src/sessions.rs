@@ -1,3 +1,4 @@
+use crate::agents::Task;
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -19,11 +20,14 @@ pub enum Kind {
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub pid: u32,
+    #[serde(skip)]
+    pub session_id: String,
     pub name: String,
     pub cwd: String,
     pub status: String,
     pub kind: Kind,
     pub since_ms: i64,
+    pub agents: Vec<Task>,
 }
 
 pub fn dir() -> PathBuf {
@@ -101,6 +105,7 @@ fn parse(path: &Path, system: &mut System) -> Option<Session> {
     let status = text("status");
     Some(Session {
         pid,
+        session_id: text("sessionId"),
         name,
         cwd,
         kind: classify(&status),
@@ -109,6 +114,7 @@ fn parse(path: &Path, system: &mut System) -> Option<Session> {
             .get("statusUpdatedAt")
             .and_then(Value::as_i64)
             .unwrap_or(0),
+        agents: Vec::new(),
     })
 }
 

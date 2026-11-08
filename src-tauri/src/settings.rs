@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "PascalCase", default)]
@@ -8,6 +11,10 @@ pub struct Settings {
     pub compact: bool,
     pub widget_visible: bool,
     pub opacity: f64,
+    pub locked: bool,
+    pub click_through: bool,
+    pub show_quotas: bool,
+    pub show_agents: bool,
     pub x: Option<i32>,
     pub y: Option<i32>,
 }
@@ -19,6 +26,10 @@ impl Default for Settings {
             compact: false,
             widget_visible: true,
             opacity: 0.9,
+            locked: false,
+            click_through: false,
+            show_quotas: false,
+            show_agents: false,
             x: None,
             y: None,
         }
@@ -31,6 +42,17 @@ pub fn data_dir() -> PathBuf {
         None => dirs::config_dir()
             .unwrap_or_default()
             .join("ClaudeSessionWidget"),
+    }
+}
+
+// Several Claude Code sessions write the same files at once; renaming keeps readers from seeing a half-written one.
+pub fn write_atomically(file: &Path, text: &str) {
+    if let Some(dir) = file.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let temp = file.with_extension("tmp");
+    if fs::write(&temp, text).is_ok() {
+        let _ = fs::rename(&temp, file);
     }
 }
 

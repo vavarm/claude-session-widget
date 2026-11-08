@@ -22,6 +22,8 @@ $app = Join-Path $work 'inst\app'; $menu = Join-Path $work 'menu'; $data = Join-
 New-Item -ItemType Directory $work, $data | Out-Null
 $common = @('-InstallDir', $app, '-StartMenuDir', $menu, '-NoLaunch')
 $env:CLAUDE_WIDGET_DATA_DIR = $data
+$claudeConfig = Join-Path $work 'claude'
+$env:CLAUDE_CONFIG_DIR = $claudeConfig
 
 try {
     $r = Run 'install.ps1' $common
@@ -41,6 +43,12 @@ try {
     Check 're-install keeps settings' (Test-Path (Join-Path $data 'settings.json'))
     Check 're-install does not leave the widget hidden for the next start' ((Get-Content (Join-Path $data 'settings.json') -Raw) -notmatch '"WidgetVisible"\s*:\s*false')
 
+    $r = Run 'install.ps1' ($common + '-Quotas', '-Agents')
+    $claudeSettings = Join-Path $claudeConfig 'settings.json'
+    Check 'install -Quotas registers the status line' ($r.Code -eq 0 -and (Get-Content $claudeSettings -Raw) -match 'ClaudeSessionWidget\.exe.*--statusline') $r.Output
+    Check 'install -Agents registers the subagent status line' ((Get-Content $claudeSettings -Raw) -match 'subagentStatusLine')
+    Check 'install -Quotas turns the setting on' ((Get-Content (Join-Path $data 'settings.json') -Raw) -match '"ShowQuotas"\s*:\s*true')
+
     $bogus = Join-Path $work 'not-an-install'; New-Item -ItemType Directory $bogus | Out-Null
     Set-Content (Join-Path $bogus 'precious.txt') 'x'
     $r = Run 'uninstall.ps1' @('-InstallDir', $bogus, '-StartMenuDir', $menu)
@@ -49,6 +57,7 @@ try {
     $r = Run 'uninstall.ps1' @('-InstallDir', $app, '-StartMenuDir', $menu)
     Check 'uninstall succeeds' ($r.Code -eq 0) $r.Output
     Check 'uninstall removes the files' (-not (Test-Path $app))
+    Check 'uninstall removes both status lines' ((Get-Content $claudeSettings -Raw) -notmatch '(?i)statusLine')
     Check 'uninstall removes the shortcut' (-not (Test-Path (Join-Path $menu 'Claude Session Widget.lnk')))
     Check 'uninstall keeps settings by default' (Test-Path (Join-Path $data 'settings.json'))
 
@@ -88,7 +97,7 @@ finally {
         $ErrorActionPreference = 'Continue'
         cargo clean --release -p claude-session-widget --manifest-path (Join-Path $PSScriptRoot '..\src-tauri\Cargo.toml') 2>&1 | Out-Null
     }
-    Remove-Item Env:CLAUDE_WIDGET_DATA_DIR, Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:CLAUDE_WIDGET_DATA_DIR, Env:CLAUDE_CONFIG_DIR, Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 }
 

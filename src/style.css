@@ -97,10 +97,63 @@ html, body {
 .busy .dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 36%, transparent); }
 
 .name, .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.name { font-size: 12.5px; font-weight: 600; }
-.sub { margin-top: 3px; font-size: 11px; color: var(--muted); }
-.compact .sub { display: none; }
+.name { font-size: 12.5px; line-height: 17px; font-weight: 600; }
+.sub { margin-top: 1px; font-size: 11px; line-height: 16px; color: var(--muted); }
+.compact .sub, .compact .agent { display: none; }
+
+.agent {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+.agent span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent span:first-child::before { content: "↳ "; opacity: 0.6; }
+.agent span:last-child { flex: none; }
+
+.card:not(.compact) .badge { display: none; }
+
+.badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--border);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+}
 .time { font-size: 11px; color: var(--muted); }
+
+.quotas {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+  height: 26px;
+  padding: 8px 14px 0;
+}
+
+.quota { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); }
+.quota-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.quota-bar i { display: block; height: 100%; border-radius: 2px; background: var(--idle); }
+.quota.high .quota-bar i { background: var(--busy); }
+.quota.limit .quota-bar i { background: var(--attention); }
+.quota.limit .quota-percent { color: var(--attention); }
+.quota-percent { min-width: 26px; text-align: right; }
+
+.note {
+  height: 15px;
+  padding: 0 14px;
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .empty {
   height: var(--row);

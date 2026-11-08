@@ -1,18 +1,24 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agents;
+mod hook;
+mod quota;
 mod sessions;
 mod settings;
 
+use hook::Hook;
+use quota::Quotas;
 use serde::Serialize;
 use sessions::{Kind, Session};
 use settings::Settings;
 use std::{
+    io::{Read, Write},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     image::Image,
@@ -28,11 +34,14 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 const WIDTH: f64 = 280.0;
 const TRAY_ID: &str = "main";
 const OPACITIES: [u32; 5] = [100, 90, 80, 60, 40];
+const NUDGE_STEPS: [i32; 2] = [1, 10];
+const NOTICE_TTL: Duration = Duration::from_secs(8);
 
 #[derive(Default)]
 struct AppState {
     settings: Mutex<Settings>,
     sessions: Mutex<Vec<Session>>,
+    notice: Mutex<Option<(String, Instant)>>,
     position_dirty: AtomicBool,
 }
 
@@ -41,17 +50,44 @@ struct Payload {
     sessions: Vec<Session>,
     compact: bool,
     opacity: f64,
+    locked: bool,
+    quotas: Option<Quotas>,
+    notice: Option<String>,
+}
+
+fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 fn payload(app: &AppHandle) -> Payload {
     let state = app.state::<AppState>();
     let sessions = state.sessions.lock().unwrap().clone();
+    let notice = state
+        .notice
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|(_, at)| at.elapsed() < NOTICE_TTL)
+        .map(|(message, _)| message.clone());
     let settings = state.settings.lock().unwrap();
+    let quotas = settings
+        .show_quotas
+        .then(|| quota::load(now_secs()))
+        .filter(|q| !q.is_empty());
     Payload {
         sessions,
         compact: settings.compact,
         opacity: settings.opacity,
+        locked: settings.locked,
+        quotas,
+        notice,
     }
+}
+
+fn set_notice(app: &AppHandle, message: String) {
+    *app.state::<AppState>().notice.lock().unwrap() = Some((message, Instant::now()));
 }
 
 fn push_state(app: &AppHandle) {
@@ -134,6 +170,19 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         );
     }
     let opacity = opacity.build()?;
+    let quotas = CheckMenuItemBuilder::with_id("quotas", "Show usage quotas")
+        .checked(settings.show_quotas)
+        .build(app)?;
+    let agents = CheckMenuItemBuilder::with_id("agents", "Show agents and background tasks")
+        .checked(settings.show_agents)
+        .build(app)?;
+    let locked = CheckMenuItemBuilder::with_id("locked", "Lock position")
+        .checked(settings.locked)
+        .build(app)?;
+    let click_through = CheckMenuItemBuilder::with_id("click_through", "Click-through")
+        .checked(settings.click_through)
+        .build(app)?;
+    let position = build_position_menu(app)?;
     let startup = CheckMenuItemBuilder::with_id("startup", "Start at login")
         .checked(autostart)
         .build(app)?;
@@ -146,12 +195,61 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &top,
             &compact,
             &opacity,
+            &quotas,
+            &agents,
+            &PredefinedMenuItem::separator(app)?,
+            &locked,
+            &click_through,
+            &position,
+            &PredefinedMenuItem::separator(app)?,
             &startup,
             &PredefinedMenuItem::separator(app)?,
             &folder,
             &quit,
         ])
         .build()
+}
+
+fn build_position_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Submenu<Wry>> {
+    let current = main_window(app)
+        .and_then(|w| w.outer_position().ok())
+        .map_or_else(
+            || "Position: unknown".to_string(),
+            |p| format!("Position: {}, {}", p.x, p.y),
+        );
+    let mut menu = SubmenuBuilder::new(app, "Position").item(
+        &MenuItemBuilder::with_id("position_label", current)
+            .enabled(false)
+            .build(app)?,
+    );
+    menu = menu.separator();
+    for (name, dx, dy) in [
+        ("Left", -1, 0),
+        ("Right", 1, 0),
+        ("Up", 0, -1),
+        ("Down", 0, 1),
+    ] {
+        for step in NUDGE_STEPS {
+            menu = menu.item(
+                &MenuItemBuilder::with_id(
+                    format!("nudge_{}_{}", dx * step, dy * step),
+                    format!("{name} {step} px"),
+                )
+                .build(app)?,
+            );
+        }
+    }
+    menu.separator()
+        .item(&MenuItemBuilder::with_id("reset_position", "Reset position").build(app)?)
+        .build()
+}
+
+fn nudge(app: &AppHandle, dx: i32, dy: i32) {
+    if let Some(window) = main_window(app) {
+        if let Ok(p) = window.outer_position() {
+            let _ = window.set_position(PhysicalPosition::new(p.x + dx, p.y + dy));
+        }
+    }
 }
 
 fn refresh_menu(app: &AppHandle) {
@@ -181,6 +279,36 @@ fn handle_menu(app: &AppHandle, id: &str) {
             settings.compact = !settings.compact;
             settings.save();
         }
+        "locked" => {
+            let mut settings = state.settings.lock().unwrap();
+            settings.locked = !settings.locked;
+            settings.save();
+        }
+        "click_through" => {
+            let enabled = {
+                let mut settings = state.settings.lock().unwrap();
+                settings.click_through = !settings.click_through;
+                settings.save();
+                settings.click_through
+            };
+            if let Some(window) = main_window(app) {
+                let _ = window.set_ignore_cursor_events(enabled);
+            }
+        }
+        "quotas" => toggle_feature(app, Feature::Quotas),
+        "agents" => toggle_feature(app, Feature::Agents),
+        "reset_position" => {
+            let settings = {
+                let mut settings = state.settings.lock().unwrap();
+                settings.x = None;
+                settings.y = None;
+                settings.save();
+                settings.clone()
+            };
+            if let Some(window) = main_window(app) {
+                place_window(&window, &settings);
+            }
+        }
         "startup" => {
             let autolaunch = app.autolaunch();
             let _ = if autolaunch.is_enabled().unwrap_or(false) {
@@ -199,11 +327,118 @@ fn handle_menu(app: &AppHandle, id: &str) {
                 let mut settings = state.settings.lock().unwrap();
                 settings.opacity = f64::from(pct) / 100.0;
                 settings.save();
+            } else if let Some((dx, dy)) = id.strip_prefix("nudge_").and_then(|d| d.split_once('_'))
+            {
+                if let (Ok(dx), Ok(dy)) = (dx.parse(), dy.parse()) {
+                    nudge(app, dx, dy);
+                }
             }
         }
     }
     push_state(app);
     refresh_menu(app);
+}
+
+// Options that need Claude Code to feed the widget through a settings.json command.
+#[derive(Clone, Copy)]
+enum Feature {
+    Quotas,
+    Agents,
+}
+
+impl Feature {
+    fn hook(self) -> Hook {
+        match self {
+            Feature::Quotas => hook::STATUS_LINE,
+            Feature::Agents => hook::SUBAGENT_STATUS_LINE,
+        }
+    }
+
+    fn enabled(self, settings: &Settings) -> bool {
+        match self {
+            Feature::Quotas => settings.show_quotas,
+            Feature::Agents => settings.show_agents,
+        }
+    }
+
+    fn set(self, settings: &mut Settings, on: bool) {
+        match self {
+            Feature::Quotas => settings.show_quotas = on,
+            Feature::Agents => settings.show_agents = on,
+        }
+    }
+
+    fn register(self) -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        self.hook().enable(&hook::claude_settings_file(), &exe)
+    }
+}
+
+fn toggle_feature(app: &AppHandle, feature: Feature) {
+    let state = app.state::<AppState>();
+    let enable = !feature.enabled(&state.settings.lock().unwrap());
+    let result = if enable {
+        feature.register()
+    } else {
+        feature.hook().disable(&hook::claude_settings_file())
+    };
+    match result {
+        Ok(()) => {
+            let mut settings = state.settings.lock().unwrap();
+            feature.set(&mut settings, enable);
+            settings.save();
+        }
+        Err(message) => set_notice(app, message),
+    }
+}
+
+fn report(result: Result<(), String>) -> i32 {
+    match result {
+        Ok(()) => 0,
+        Err(message) => {
+            let _ = writeln!(std::io::stdout(), "{message}");
+            2
+        }
+    }
+}
+
+fn read_stdin() -> String {
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    input
+}
+
+// Command-line modes used by Claude Code (as a status line command) and by the installers.
+fn run_cli() -> Option<i32> {
+    let enable = |feature: Feature| {
+        report(feature.register().inspect(|()| {
+            let mut settings = Settings::load();
+            feature.set(&mut settings, true);
+            settings.save();
+        }))
+    };
+    match std::env::args().nth(1)?.as_str() {
+        "--statusline" => {
+            if let Some(quotas) = quota::parse_status(&read_stdin()) {
+                quota::save(&quotas);
+            }
+            Some(0)
+        }
+        "--subagent-status" => {
+            if let Some((session_id, tasks)) = agents::parse_input(&read_stdin()) {
+                agents::save(&session_id, tasks, now_secs() * 1000);
+            }
+            Some(0)
+        }
+        "--enable-quotas" => Some(enable(Feature::Quotas)),
+        "--enable-agents" => Some(enable(Feature::Agents)),
+        "--remove-hooks" => Some(report(
+            hook::ALL
+                .iter()
+                .try_for_each(|h| h.disable(&hook::claude_settings_file())),
+        )),
+        _ => None,
+    }
 }
 
 fn open_folder(path: &std::path::Path) {
@@ -289,6 +524,9 @@ fn place_window(window: &WebviewWindow, settings: &Settings) {
 }
 
 fn main() {
+    if let Some(code) = run_cli() {
+        std::process::exit(code);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             set_visible(app, true)
@@ -314,7 +552,16 @@ fn main() {
             let window = main_window(&handle).expect("main window is declared in tauri.conf.json");
 
             window.set_always_on_top(settings.always_on_top)?;
+            window.set_ignore_cursor_events(settings.click_through)?;
             place_window(&window, &settings);
+            for feature in [Feature::Quotas, Feature::Agents] {
+                if !feature.enabled(&settings) {
+                    continue;
+                }
+                if let Err(message) = feature.register() {
+                    set_notice(&handle, message);
+                }
+            }
             if settings.widget_visible {
                 window.show()?;
             }
@@ -356,7 +603,19 @@ fn main() {
             thread::spawn(move || {
                 let mut last_snapshot = String::new();
                 loop {
-                    let list = sessions::read(&sessions::dir());
+                    let mut list = sessions::read(&sessions::dir());
+                    let show_agents = handle
+                        .state::<AppState>()
+                        .settings
+                        .lock()
+                        .unwrap()
+                        .show_agents;
+                    if show_agents {
+                        let now = now_secs() * 1000;
+                        for session in &mut list {
+                            session.agents = agents::load(&session.session_id, now);
+                        }
+                    }
                     let snapshot = list
                         .iter()
                         .map(|s| format!("{}:{:?}", s.pid, s.kind))

@@ -1,6 +1,6 @@
 [package]
 name = "claude-session-widget"
-version = "1.0.0"
+version = "1.1.0"
 description = "Always-on-top widget that tracks your Claude Code sessions"
 edition = "2021"
 license = "MIT"

@@ -101,13 +101,18 @@ export function untilReset(resetsAt, now = Date.now() / 1000) {
 
 const QUOTA_WINDOWS = [["fiveHour", "5h"], ["sevenDay", "7d"]];
 
-// Bars for each known window; a window at the limit also gets a line saying when it resets.
+// Bars for each window; a window at the limit also gets a line saying when it resets.
+// A window with no current figure (for instance one that has just reset) stays as an empty bar when the other is known.
 export function quotaView(quotas, now = Date.now() / 1000) {
   const bars = [];
   const notes = [];
+  const anyKnown = QUOTA_WINDOWS.some(([key]) => quotas?.[key]);
   for (const [key, name] of QUOTA_WINDOWS) {
     const window = quotas?.[key];
-    if (!window) continue;
+    if (!window) {
+      if (anyKnown) bars.push({ name, percent: null, limit: false });
+      continue;
+    }
     const percent = Math.min(Math.max(Math.round(window.usedPercentage), 0), 100);
     const limit = percent >= LIMIT_PERCENT;
     bars.push({ name, percent, limit });

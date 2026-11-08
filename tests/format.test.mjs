@@ -94,9 +94,17 @@ test("quotaView says when old figures were read, and stays silent for current on
   assert.deepEqual(quotaView({ fiveHour: window, asOf: null }, 5000).notes, []);
 });
 
+test("quotaView keeps an empty bar for a window without a current figure", () => {
+  const view = quotaView({ sevenDay: { usedPercentage: 48, resetsAt: 5000 } }, 1000);
+  assert.deepEqual(view.bars, [
+    { name: "5h", percent: null, limit: false },
+    { name: "7d", percent: 48, limit: false },
+  ]);
+});
+
 test("quotaView copes with missing windows and absent quotas", () => {
   assert.deepEqual(quotaView(null), { bars: [], notes: [] });
-  assert.equal(quotaView({ sevenDay: { usedPercentage: 150, resetsAt: 5000 } }, 1000).bars[0].percent, 100);
+  assert.equal(quotaView({ sevenDay: { usedPercentage: 150, resetsAt: 5000 } }, 1000).bars[1].percent, 100);
 });
 
 test("extraHeight adds the bars once and one line per note", () => {

@@ -26,8 +26,8 @@ function quotaHtml(quota) {
   const bars = quota.bars.map(({ name, percent, limit }) => `
     <div class="quota ${limit ? "limit" : percent >= 70 ? "high" : ""}">
       <span class="quota-name">${name}</span>
-      <span class="quota-bar"><i style="width: ${percent}%"></i></span>
-      <span class="quota-percent">${percent}%</span>
+      <span class="quota-bar"><i style="width: ${percent ?? 0}%"></i></span>
+      <span class="quota-percent">${percent == null ? "\u2013" : `${percent}%`}</span>
     </div>`).join("");
   return `<div class="quotas">${bars}</div>`;
 }

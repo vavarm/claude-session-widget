@@ -1,0 +1,86 @@
+name: Prepare release
+
+# Bumps the version, tags it and publishes the release in one go. Run it from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - name: Only release from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Run this workflow on main, not on $GITHUB_REF_NAME." >&2
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Require green CI on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq length)
+          if [ "$passed" -lt 1 ]; then
+            echo "CI has not passed on $GITHUB_SHA yet." >&2
+            exit 1
+          fi
+
+      - name: Compute the next version
+        id: next
+        run: |
+          current=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)
+          IFS=. read -r major minor patch <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) next="$((major + 1)).0.0" ;;
+            minor) next="$major.$((minor + 1)).0" ;;
+            patch) next="$major.$minor.$((patch + 1))" ;;
+          esac
+          if git rev-parse -q --verify "refs/tags/v$next" > /dev/null; then
+            echo "Tag v$next already exists." >&2
+            exit 1
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next" >> "$GITHUB_OUTPUT"
+
+      - name: Bump the crate version
+        run: |
+          sed -i '0,/^version = ".*"/s//version = "${{ steps.next.outputs.version }}"/' src-tauri/Cargo.toml
+          cargo update --workspace --manifest-path src-tauri/Cargo.toml
+          cargo metadata --locked --no-deps --format-version 1 --manifest-path src-tauri/Cargo.toml > /dev/null
+          changed=$(git diff --name-only | sort | tr '\n' ' ')
+          if [ "$changed" != "src-tauri/Cargo.lock src-tauri/Cargo.toml " ]; then
+            echo "Unexpected changes: $changed" >&2
+            exit 1
+          fi
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): ${{ steps.next.outputs.version }}"
+          git tag "${{ steps.next.outputs.tag }}"
+          git push --atomic origin HEAD:main "${{ steps.next.outputs.tag }}"
+
+  release:
+    needs: prepare
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}

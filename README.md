@@ -147,7 +147,9 @@ tests/       UI tests, Windows end-to-end test, installer script tests
 scripts/     install, update, uninstall (PowerShell and shell)
 ```
 
-CI runs formatting, clippy and the tests on all three platforms, plus the shell installer test on Linux. Pushing a `v*` tag builds the binaries and publishes a release; the tag must match the version in `src-tauri/Cargo.toml`.
+CI runs formatting, clippy and the tests on all three platforms, plus the shell installer test on Linux.
+
+**Releasing**: run the *Prepare release* workflow from the Actions tab on `main` and pick `patch`, `minor` or `major`. It requires a green CI on the commit, raises the version in `src-tauri/Cargo.toml` and `Cargo.lock`, commits `chore(release): X.Y.Z`, tags it, then builds the four binaries and publishes the release with generated notes and `SHA256SUMS.txt`. Pushing a `v*` tag by hand also publishes a release; the tag must then match the version in `src-tauri/Cargo.toml`.
 
 ## License
 

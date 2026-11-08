@@ -3,11 +3,18 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to build and publish, already pushed
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 env:
+  TAG: ${{ inputs.tag || github.ref_name }}
   LINUX_DEPS: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
 
 jobs:
@@ -23,13 +30,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Check the tag matches the crate version
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $version" >&2
+          if [ "v$version" != "$TAG" ]; then
+            echo "Tag $TAG does not match Cargo.toml version $version" >&2
             exit 1
           fi
 
@@ -56,7 +65,7 @@ jobs:
         id: pack
         shell: bash
         run: |
-          dir="claude-session-widget-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          dir="claude-session-widget-${TAG}-${{ matrix.name }}"
           mkdir "$dir"
           cp "src-tauri/target/${{ matrix.target }}/release/ClaudeSessionWidget${{ matrix.ext }}" "$dir/"
           cp README.md "$dir/"
@@ -90,4 +99,4 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag

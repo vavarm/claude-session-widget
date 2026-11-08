@@ -64,6 +64,7 @@ function Expected-Height($hwnd, $rows, $compact = $false, $extra = 0) {
     $row = if ($compact) { 28 } else { 46 }
     (34 + [Math]::Max($rows, 1) * $row + $extra + 8) * [Win]::GetDpiForWindow($hwnd) / 96.0
 }
+function Collapsed-Height-Is($hwnd) { [Math]::Abs((Win-Height $hwnd) - (34 + 8) * [Win]::GetDpiForWindow($hwnd) / 96.0) -le 2 }
 function Height-Is($hwnd, $rows, $compact = $false, $extra = 0) { [Math]::Abs((Win-Height $hwnd) - (Expected-Height $hwnd $rows $compact $extra)) -le 2 }
 
 # --- DevTools protocol client -------------------------------------------------------------
@@ -105,9 +106,9 @@ function Click-Menu([string]$id) {
 # --- Fixtures -----------------------------------------------------------------------------
 function New-Dummy { Start-Process powershell -ArgumentList '-NoProfile', '-Command', 'Start-Sleep 600' -WindowStyle Hidden -PassThru }
 
-function Write-Session($dir, $pidValue, $startFileTime, $status, $name) {
+function Write-Session($dir, $pidValue, $startFileTime, $status, $name, $agoMs = 0) {
     $json = @{ pid = $pidValue; sessionId = "sess-$name"; procStart = [string]$startFileTime; cwd = "C:\work\$name"
-               name = $name; status = $status; statusUpdatedAt = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } | ConvertTo-Json -Compress
+               name = $name; status = $status; statusUpdatedAt = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() - $agoMs } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText((Join-Path $dir "$pidValue.json"), $json, (New-Object Text.UTF8Encoding $false))
 }
 
@@ -168,7 +169,7 @@ try {
     Check 'menu: always-on-top off' ((Click-Menu 'top') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 8) -eq 0 }) -and -not (Read-Settings).AlwaysOnTop)
 
     $now = [DateTimeOffset]::Now.ToUnixTimeSeconds()
-    $status = @{ rate_limits = @{ five_hour = @{ used_percentage = 96.2; resets_at = $now + 1800 }; seven_day = @{ used_percentage = 40; resets_at = $now + 86400 } } } | ConvertTo-Json -Compress -Depth 4
+    $status = @{ session_id = 'sess-bravo'; model = @{ display_name = 'Opus' }; context_window = @{ used_percentage = 42 }; rate_limits = @{ five_hour = @{ used_percentage = 96.2; resets_at = $now + 1800 }; seven_day = @{ used_percentage = 40; resets_at = $now + 86400 } } } | ConvertTo-Json -Compress -Depth 4
     # PowerShell does not feed a pipe to a GUI-subsystem executable, so stdin comes from a file.
     $statusFile = Join-Path $work 'status.json'
     [IO.File]::WriteAllText($statusFile, $status)
@@ -177,6 +178,7 @@ try {
     Check 'quotas stay hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.quota').length") -eq 0)
     $extra = 26 + 15
     Check 'menu: quotas on shows both bars and the reset of the exhausted one' ((Click-Menu 'quotas') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.quota').length") -eq 2 }) -and (Wait-Until { (Cdp-Eval "document.querySelector('.note')?.textContent") -match '^5h limit: resets in (29|30)m$' }) -and (Wait-Until { Height-Is $hwnd 3 $false $extra }) -and (Read-Settings).ShowQuotas) "got $(Win-Height $hwnd)"
+    Check 'quotas option also shows the session context bar and model' ((Wait-Until { (Cdp-Eval "document.querySelector('.row.busy .ctx b')?.style.width") -eq '42%' }) -and ((Cdp-Eval "document.querySelector('.row.busy').title") -match 'Opus.*context 42 %'))
     Check 'quotas turn on the Claude Code status line' ((Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -match 'ClaudeSessionWidget.*--statusline')
     Check 'menu: quotas off hides them and removes the status line' ((Click-Menu 'quotas') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.quota').length") -eq 0 }) -and (Wait-Until { Height-Is $hwnd 3 }) -and (Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -notmatch 'statusLine')
 
@@ -207,6 +209,22 @@ try {
 
     Write-Session $sessions $a.Id $a.StartTime.ToFileTime() 'idle' 'alpha'
     Check 'status change is picked up' (Wait-Until { (Page-State).rows[0] -eq 'idle' } 10)
+
+    Write-Session $sessions $c.Id $c.StartTime.ToFileTime() 'idle' 'charlie' (2 * 3600 * 1000)
+    Check 'menu: fold idle sessions' ((Click-Menu 'fold_idle') -and (Wait-Until { (Cdp-Eval "document.querySelector('.folded')?.textContent") -eq '+1 idle for over an hour' }) -and (Wait-Until { Height-Is $hwnd 1 $false 28 }) -and (Read-Settings).FoldIdle) "got $(Win-Height $hwnd)"
+    [void](Click-Menu 'fold_idle')
+    Check 'menu: collapse when nothing runs' ((Click-Menu 'auto_collapse') -and (Wait-Until { Collapsed-Height-Is $hwnd }) -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.row').length") -eq 0 })) "got $(Win-Height $hwnd)"
+    [void](Click-Menu 'auto_collapse')
+    Check 'expanded again after turning collapse off' (Wait-Until { Height-Is $hwnd 2 })
+
+    foreach ($id in 'notify_attention', 'notify_finished', 'notify_quota') { [void](Click-Menu $id) }
+    Check 'menu: notification options are saved' (Wait-Until { $s = Read-Settings; $s.NotifyAttention -and $s.NotifyFinished -and $s.NotifyQuota })
+    foreach ($id in 'notify_attention', 'notify_finished', 'notify_quota') { [void](Click-Menu $id) }
+
+    [void](Click-Menu 'shortcut_CommandOrControl+Alt+W')
+    Check 'menu: shortcut is registered and saved' (Wait-Until { (Read-Settings).Shortcut -eq 'CommandOrControl+Alt+W' })
+    [void](Click-Menu 'shortcut_off')
+    Check 'menu: shortcut can be cleared' (Wait-Until { (Read-Settings).Shortcut -eq '' })
 
     Stop-Process $a, $c -Force
     Check 'no live session: empty state' ((Wait-Until { (Page-State).empty } 10) -and (Wait-Until { Height-Is $hwnd 0 }))

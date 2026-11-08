@@ -58,13 +58,8 @@ pub fn parse_input(input: &str) -> Option<(String, Vec<Task>)> {
     Some((session_id, tasks))
 }
 
-// Session ids become file names, so anything but a plain identifier is refused.
 fn file_for(session_id: &str) -> Option<PathBuf> {
-    let plain = !session_id.is_empty()
-        && session_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    plain.then(|| dir().join(format!("{session_id}.json")))
+    settings::session_file(&dir(), session_id)
 }
 
 pub fn save(session_id: &str, tasks: Vec<Task>, now: i64) {

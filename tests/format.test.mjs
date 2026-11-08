@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   agentLines,
+  contextLevel,
   elapsed,
   escapeHtml,
   extraHeight,
   folderName,
+  infoTitle,
   label,
+  layout,
   quotaView,
   untilReset,
   windowHeight,
@@ -94,6 +97,44 @@ test("extraHeight adds the bars once and one line per note", () => {
   assert.equal(extraHeight(view, "notice"), 26 + 30);
   assert.equal(extraHeight({ bars: [], notes: [] }, "notice"), 15);
   assert.equal(windowHeight(sessions(1), false, 26), 34 + 46 + 26 + 8);
+});
+
+const HOUR = 3_600_000;
+const withState = (list, extra = {}) => ({ sessions: list, compact: false, foldIdle: false, autoCollapse: false, quotas: null, notice: null, ...extra });
+const live = (kind, ago = 1000) => ({ kind, sinceMs: NOW - ago, agents: [] });
+
+test("layout folds sessions idle for over an hour when asked", () => {
+  const list = [live("busy"), live("idle", 2 * HOUR), live("idle", 5 * 60_000)];
+  assert.equal(layout(withState(list), false, NOW).shown.length, 3);
+
+  const folded = layout(withState(list, { foldIdle: true }), false, NOW);
+  assert.equal(folded.shown.length, 2);
+  assert.equal(folded.folded.length, 1);
+  assert.equal(folded.height, 34 + 2 * 46 + 28 + 8);
+});
+
+test("layout leaves no empty-state row when everything is folded", () => {
+  const result = layout(withState([live("idle", 2 * HOUR)], { foldIdle: true }), false, NOW);
+  assert.equal(result.height, 34 + 28 + 8);
+});
+
+test("layout collapses to the header only while nothing runs and the pointer is away", () => {
+  const quiet = withState([live("idle"), live("idle")], { autoCollapse: true });
+  assert.equal(layout(quiet, false, NOW).collapsed, true);
+  assert.equal(layout(quiet, false, NOW).height, 34 + 8);
+  assert.equal(layout(quiet, true, NOW).collapsed, false);
+  assert.equal(layout(withState([live("busy")], { autoCollapse: true }), false, NOW).collapsed, false);
+  assert.equal(layout(withState([live("attention")], { autoCollapse: true }), false, NOW).collapsed, false);
+  assert.equal(layout(withState([live("idle")]), false, NOW).collapsed, false);
+});
+
+test("contextLevel and infoTitle describe a session's context and cost", () => {
+  assert.equal(contextLevel(50), "");
+  assert.equal(contextLevel(80), "warning");
+  assert.equal(contextLevel(97), "critical");
+  assert.equal(infoTitle({ model: "Opus", contextPercent: 42.4, costUsd: 1.234 }), "Opus · context 42 % · $1.23");
+  assert.equal(infoTitle({ model: "", contextPercent: null, costUsd: 0 }), "");
+  assert.equal(infoTitle(null), "");
 });
 
 test("escapeHtml neutralises markup in session names", () => {

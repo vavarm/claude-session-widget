@@ -1,4 +1,4 @@
-use crate::agents::Task;
+use crate::{agents::Task, info::Info};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -28,6 +28,7 @@ pub struct Session {
     pub kind: Kind,
     pub since_ms: i64,
     pub agents: Vec<Task>,
+    pub info: Option<Info>,
 }
 
 pub fn dir() -> PathBuf {
@@ -115,6 +116,7 @@ fn parse(path: &Path, system: &mut System) -> Option<Session> {
             .and_then(Value::as_i64)
             .unwrap_or(0),
         agents: Vec::new(),
+        info: None,
     })
 }
 

@@ -1,10 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod agents;
+mod focus;
 mod hook;
+mod info;
+mod notify;
 mod quota;
 mod sessions;
 mod settings;
+mod tray;
 
 use hook::Hook;
 use quota::Quotas;
@@ -21,7 +25,6 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
-    image::Image,
     menu::{
         CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem,
         SubmenuBuilder,
@@ -30,12 +33,19 @@ use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewWindow, Wry,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 const WIDTH: f64 = 280.0;
 const TRAY_ID: &str = "main";
 const OPACITIES: [u32; 5] = [100, 90, 80, 60, 40];
 const NUDGE_STEPS: [i32; 2] = [1, 10];
 const NOTICE_TTL: Duration = Duration::from_secs(8);
+const SHORTCUTS: [&str; 3] = [
+    "CommandOrControl+Alt+C",
+    "CommandOrControl+Alt+W",
+    "CommandOrControl+Alt+Space",
+];
+const KEEP_PER_SESSION_FILES: Duration = Duration::from_secs(7 * 24 * 3600);
 
 #[derive(Default)]
 struct AppState {
@@ -46,11 +56,14 @@ struct AppState {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct Payload {
     sessions: Vec<Session>,
     compact: bool,
     opacity: f64,
     locked: bool,
+    fold_idle: bool,
+    auto_collapse: bool,
     quotas: Option<Quotas>,
     notice: Option<String>,
 }
@@ -81,6 +94,8 @@ fn payload(app: &AppHandle) -> Payload {
         compact: settings.compact,
         opacity: settings.opacity,
         locked: settings.locked,
+        fold_idle: settings.fold_idle,
+        auto_collapse: settings.auto_collapse,
         quotas,
         notice,
     }
@@ -115,6 +130,27 @@ fn show_menu(app: AppHandle, window: WebviewWindow) {
 #[tauri::command]
 fn menu_action(app: AppHandle, id: String) {
     handle_menu(&app, &id);
+}
+
+#[tauri::command]
+fn open_session(app: AppHandle, pid: u32) {
+    let session = app
+        .state::<AppState>()
+        .sessions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|s| s.pid == pid)
+        .cloned();
+    if let Some(session) = session {
+        let folder = std::path::Path::new(&session.cwd)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !focus::focus(pid, &folder) {
+            open_folder(std::path::Path::new(&session.cwd));
+        }
+    }
 }
 
 fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
@@ -170,12 +206,61 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         );
     }
     let opacity = opacity.build()?;
-    let quotas = CheckMenuItemBuilder::with_id("quotas", "Show usage quotas")
-        .checked(settings.show_quotas)
-        .build(app)?;
-    let agents = CheckMenuItemBuilder::with_id("agents", "Show agents and background tasks")
-        .checked(settings.show_agents)
-        .build(app)?;
+    let check = |id: &str, label: &str, checked: bool| {
+        CheckMenuItemBuilder::with_id(id, label)
+            .checked(checked)
+            .build(app)
+    };
+    let quotas = check(
+        "quotas",
+        "Show usage quotas and context",
+        settings.show_quotas,
+    )?;
+    let agents = check(
+        "agents",
+        "Show agents and background tasks",
+        settings.show_agents,
+    )?;
+    let fold_idle = check(
+        "fold_idle",
+        "Fold sessions idle for an hour",
+        settings.fold_idle,
+    )?;
+    let auto_collapse = check(
+        "auto_collapse",
+        "Collapse when nothing is running",
+        settings.auto_collapse,
+    )?;
+    let notifications = SubmenuBuilder::new(app, "Notifications")
+        .item(&check(
+            "notify_attention",
+            "A session needs you",
+            settings.notify_attention,
+        )?)
+        .item(&check(
+            "notify_finished",
+            "A session finishes",
+            settings.notify_finished,
+        )?)
+        .item(&check(
+            "notify_quota",
+            "A quota is nearly used up",
+            settings.notify_quota,
+        )?)
+        .build()?;
+    let mut shortcut = SubmenuBuilder::new(app, "Show/hide shortcut").item(&check(
+        "shortcut_off",
+        "None",
+        settings.shortcut.is_empty(),
+    )?);
+    for spec in SHORTCUTS {
+        shortcut = shortcut.item(&check(
+            &format!("shortcut_{spec}"),
+            &spec.replace("CommandOrControl", "Ctrl"),
+            settings.shortcut == spec,
+        )?);
+    }
+    let shortcut = shortcut.build()?;
     let locked = CheckMenuItemBuilder::with_id("locked", "Lock position")
         .checked(settings.locked)
         .build(app)?;
@@ -197,10 +282,14 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &opacity,
             &quotas,
             &agents,
+            &fold_idle,
+            &auto_collapse,
+            &notifications,
             &PredefinedMenuItem::separator(app)?,
             &locked,
             &click_through,
             &position,
+            &shortcut,
             &PredefinedMenuItem::separator(app)?,
             &startup,
             &PredefinedMenuItem::separator(app)?,
@@ -297,6 +386,11 @@ fn handle_menu(app: &AppHandle, id: &str) {
         }
         "quotas" => toggle_feature(app, Feature::Quotas),
         "agents" => toggle_feature(app, Feature::Agents),
+        "fold_idle" => toggle(&state, |s| &mut s.fold_idle),
+        "auto_collapse" => toggle(&state, |s| &mut s.auto_collapse),
+        "notify_attention" => toggle(&state, |s| &mut s.notify_attention),
+        "notify_finished" => toggle(&state, |s| &mut s.notify_finished),
+        "notify_quota" => toggle(&state, |s| &mut s.notify_quota),
         "reset_position" => {
             let settings = {
                 let mut settings = state.settings.lock().unwrap();
@@ -332,11 +426,58 @@ fn handle_menu(app: &AppHandle, id: &str) {
                 if let (Ok(dx), Ok(dy)) = (dx.parse(), dy.parse()) {
                     nudge(app, dx, dy);
                 }
+            } else if let Some(spec) = id.strip_prefix("shortcut_") {
+                choose_shortcut(app, if spec == "off" { "" } else { spec });
             }
         }
     }
     push_state(app);
     refresh_menu(app);
+}
+
+fn toggle(state: &AppState, field: impl FnOnce(&mut Settings) -> &mut bool) {
+    let mut settings = state.settings.lock().unwrap();
+    let value = field(&mut settings);
+    *value = !*value;
+    settings.save();
+}
+
+fn apply_shortcut(app: &AppHandle, spec: &str) -> Result<(), String> {
+    let shortcuts = app.global_shortcut();
+    shortcuts.unregister_all().map_err(|e| e.to_string())?;
+    if spec.is_empty() {
+        return Ok(());
+    }
+    shortcuts
+        .on_shortcut(spec, |app, _, event| {
+            if event.state() == ShortcutState::Pressed {
+                set_visible(app, !is_visible(app));
+                refresh_menu(app);
+            }
+        })
+        .map_err(|e| format!("The shortcut {spec} is unavailable: {e}"))
+}
+
+fn choose_shortcut(app: &AppHandle, spec: &str) {
+    match apply_shortcut(app, spec) {
+        Ok(()) => {
+            let state = app.state::<AppState>();
+            let mut settings = state.settings.lock().unwrap();
+            settings.shortcut = spec.to_string();
+            settings.save();
+        }
+        Err(message) => {
+            let previous = app
+                .state::<AppState>()
+                .settings
+                .lock()
+                .unwrap()
+                .shortcut
+                .clone();
+            let _ = apply_shortcut(app, &previous);
+            set_notice(app, message);
+        }
+    }
 }
 
 // Options that need Claude Code to feed the widget through a settings.json command.
@@ -419,8 +560,12 @@ fn run_cli() -> Option<i32> {
     };
     match std::env::args().nth(1)?.as_str() {
         "--statusline" => {
-            if let Some(quotas) = quota::parse_status(&read_stdin()) {
+            let input = read_stdin();
+            if let Some(quotas) = quota::parse_status(&input) {
                 quota::save(&quotas);
+            }
+            if let Some((session_id, info)) = info::parse_status(&input) {
+                info::save(&session_id, &info);
             }
             Some(0)
         }
@@ -452,32 +597,6 @@ fn open_folder(path: &std::path::Path) {
     let _ = std::process::Command::new(opener).arg(path).spawn();
 }
 
-fn tray_color(sessions: &[Session]) -> [u8; 3] {
-    let any = |kind| sessions.iter().any(|s| s.kind == kind);
-    if any(Kind::Attention) {
-        [248, 81, 73]
-    } else if any(Kind::Busy) {
-        [245, 165, 36]
-    } else if sessions.is_empty() {
-        [130, 130, 140]
-    } else {
-        [63, 185, 80]
-    }
-}
-
-fn tray_icon(color: [u8; 3]) -> Image<'static> {
-    const SIZE: u32 = 32;
-    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let (dx, dy) = (x as f32 + 0.5 - 16.0, y as f32 + 0.5 - 16.0);
-            let alpha = (15.0 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
-            rgba.extend_from_slice(&[color[0], color[1], color[2], (alpha * 255.0) as u8]);
-        }
-    }
-    Image::new_owned(rgba, SIZE, SIZE)
-}
-
 fn update_tray(app: &AppHandle) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
@@ -493,7 +612,7 @@ fn update_tray(app: &AppHandle) {
     if count(Kind::Attention) > 0 {
         tooltip += &format!(", {} need you", count(Kind::Attention));
     }
-    let _ = tray.set_icon(Some(tray_icon(tray_color(&sessions))));
+    let _ = tray.set_icon(Some(tray::icon(&tray::base_icon(), tray::color(&sessions))));
     let _ = tray.set_tooltip(Some(tooltip));
 }
 
@@ -535,6 +654,8 @@ fn main() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState {
             settings: Mutex::new(Settings::load()),
             ..Default::default()
@@ -543,7 +664,8 @@ fn main() {
             get_state,
             fit,
             show_menu,
-            menu_action
+            menu_action,
+            open_session
         ])
         .on_menu_event(|app, event| handle_menu(app, event.id().as_ref()))
         .setup(|app| {
@@ -562,6 +684,14 @@ fn main() {
                     set_notice(&handle, message);
                 }
             }
+            if let Err(message) = apply_shortcut(&handle, &settings.shortcut) {
+                set_notice(&handle, message);
+            }
+            settings::prune_older_than(
+                &settings::data_dir().join("agents"),
+                KEEP_PER_SESSION_FILES,
+            );
+            settings::prune_older_than(&settings::data_dir().join("info"), KEEP_PER_SESSION_FILES);
             if settings.widget_visible {
                 window.show()?;
             }
@@ -583,7 +713,7 @@ fn main() {
             });
 
             TrayIconBuilder::with_id(TRAY_ID)
-                .icon(tray_icon(tray_color(&[])))
+                .icon(tray::icon(&tray::base_icon(), tray::color(&[])))
                 .menu(&build_menu(&handle)?)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
@@ -602,18 +732,33 @@ fn main() {
 
             thread::spawn(move || {
                 let mut last_snapshot = String::new();
+                let mut watcher = notify::Watcher::default();
                 loop {
                     let mut list = sessions::read(&sessions::dir());
-                    let show_agents = handle
-                        .state::<AppState>()
-                        .settings
-                        .lock()
-                        .unwrap()
-                        .show_agents;
-                    if show_agents {
-                        let now = now_secs() * 1000;
-                        for session in &mut list {
-                            session.agents = agents::load(&session.session_id, now);
+                    let options = handle.state::<AppState>().settings.lock().unwrap().clone();
+                    for session in &mut list {
+                        if options.show_agents {
+                            session.agents = agents::load(&session.session_id, now_secs() * 1000);
+                        }
+                        if options.show_quotas {
+                            session.info = info::load(&session.session_id);
+                        }
+                    }
+                    for (reason, name) in watcher.sessions(&list) {
+                        match reason {
+                            notify::Reason::NeedsYou if options.notify_attention => {
+                                notify::show(&handle, &name, "Needs you");
+                            }
+                            notify::Reason::Finished if options.notify_finished => {
+                                notify::show(&handle, &name, "Finished");
+                            }
+                            _ => {}
+                        }
+                    }
+                    if options.notify_quota {
+                        let now = now_secs();
+                        for message in watcher.quotas(&quota::load(now), now) {
+                            notify::show(&handle, "Claude usage", &message);
                         }
                     }
                     let snapshot = list

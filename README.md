@@ -6,10 +6,13 @@ A small always-on-top widget that shows your running [Claude Code](https://claud
 
 - One row per live session: name, project folder, state, time spent in that state.
 - Sessions that need you come first. The tray icon takes the colour of the most urgent one.
-- Tray icon and menu: show/hide, always on top, compact mode, opacity, start at login.
+- The tray icon is the app icon with a dot in the colour of the most urgent state. Its menu covers show/hide, always on top, compact mode, opacity and start at login.
+- Double-click a session to bring its terminal or editor window to the front (the project folder opens if no window is found).
 - Placement: lock the position, exact position in pixels (nudge buttons), click-through.
-- Optional usage quotas: 5-hour and weekly bars, with the reset time once a window is nearly used up.
+- Optional usage quotas: 5-hour and weekly bars, with the reset time once a window is nearly used up, and a context bar per session.
 - Optional agents and background tasks: the running ones are listed under their session.
+- Optional notifications when a session needs you, finishes, or a quota is nearly used up.
+- Optional layout helpers: fold sessions idle for an hour, collapse to the header while nothing runs, and a global show/hide shortcut.
 - Reads the session files Claude Code already writes, and makes no network access. Only the two options above touch your Claude Code setup, and only if you turn them on (see [Optional features](#optional-features)).
 - Windows, macOS and Linux (see [platform status](#platform-status)).
 
@@ -67,6 +70,14 @@ Options: `-InstallDir`, `-StartMenuDir`, `-Autostart`, `-Quotas`, `-Agents`, `-N
 
 Only one instance runs at a time.
 
+Double-clicking a session looks for the window of the terminal or editor that started it, and prefers the one whose title mentions the project. On Linux and macOS, and when no window is found, it opens the project folder instead.
+
+Layout options in the tray menu:
+
+- **Fold sessions idle for an hour** replaces them with a single "+N idle" line.
+- **Collapse when nothing is running** shrinks the widget to its header while no session is busy or waiting; hovering it expands it again.
+- **Show/hide shortcut** registers a global shortcut (Ctrl+Alt+C, Ctrl+Alt+W or Ctrl+Alt+Space; Cmd on macOS). If another application already owns it, the widget says so.
+
 Placement options in the tray menu:
 
 - **Lock position** disables dragging.
@@ -77,7 +88,7 @@ Placement options in the tray menu:
 
 Both are off by default. Enable them from the tray menu or at install time.
 
-- **Show usage quotas** (`-Quotas` / `--quotas`) adds two thin bars for the 5-hour and weekly limits. When a window reaches 90 %, a line under the bars says when it resets.
+- **Show usage quotas and context** (`-Quotas` / `--quotas`) adds two thin bars for the 5-hour and weekly limits. When a window reaches 90 %, a line under the bars says when it resets. It also draws a thin context bar at the bottom of each session (orange from 80 %, red from 95 %); hovering a session shows its model, context and cost.
 - **Show agents and background tasks** (`-Agents` / `--agents`) lists the running subagents and background tasks under their session (up to three lines, the rest folded into "+N more"). In compact mode a small counter replaces the lines.
 
 Claude Code only hands this data to commands configured in its settings, so enabling an option registers the widget itself in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`): `ClaudeSessionWidget --statusline` as the `statusLine` for quotas, `ClaudeSessionWidget --subagent-status` as the `subagentStatusLine` for agents. These commands print nothing and write what they receive to the data folder; the widget makes no network request. Notes:
@@ -86,6 +97,8 @@ Claude Code only hands this data to commands configured in its settings, so enab
 - Turning an option off, and uninstalling, remove the entry again. The other settings in the file are left as they are.
 - The data is only as fresh as Claude Code's last refresh: quotas follow your session activity, and agent lines disappear after 30 seconds without an update. Nothing is shown if Claude Code does not report limits for your account.
 - Which kinds of background work appear in the agent list depends on what Claude Code puts in its agent panel; the widget shows every running entry it receives.
+
+**Notifications** (tray menu only) can be switched on separately for a session that needs you, a session that finishes (busy to idle), and a quota reaching 90 % (once per reset period; it needs the usage option above). They are system notifications and never replay what was already true when you turn them on. Whether "needs you" ever fires depends on the status values Claude Code writes, of which only `busy` and `idle` have been observed.
 
 ## Configuration
 

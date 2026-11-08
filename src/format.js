@@ -45,11 +45,45 @@ export function folderName(cwd) {
   return cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
 }
 
-export function windowHeight(sessions, compact, extra = 0) {
+export function windowHeight(sessions, compact, extra = 0, emptyRow = true) {
   const rows = sessions.length
     ? sessions.reduce((sum, s) => sum + rowHeight(compact, rowLineCount(s, compact)), 0)
-    : rowHeight(compact);
+    : emptyRow ? rowHeight(compact) : 0;
   return HEADER_HEIGHT + rows + extra + FOOTER_HEIGHT;
+}
+
+export const FOLD_AFTER_MS = 3_600_000;
+export const FOLDED_HEIGHT = 28;
+export const CONTEXT_WARNING = 80;
+export const CONTEXT_CRITICAL = 95;
+
+// Decides what the widget shows: which sessions, whether it shrinks to its header, and its height.
+export function layout(state, hover, now = Date.now()) {
+  const { sessions, compact, foldIdle, autoCollapse, quotas, notice } = state;
+  const folded = foldIdle ? sessions.filter((s) => s.kind === "idle" && now - s.sinceMs > FOLD_AFTER_MS) : [];
+  const shown = sessions.filter((s) => !folded.includes(s));
+  const quiet = sessions.every((s) => s.kind !== "busy" && s.kind !== "attention");
+  const collapsed = Boolean(autoCollapse) && quiet && !hover;
+  const quota = quotaView(quotas, now / 1000);
+  const extra = extraHeight(quota, notice) + (folded.length ? FOLDED_HEIGHT : 0);
+  const height = collapsed
+    ? HEADER_HEIGHT + FOOTER_HEIGHT
+    : windowHeight(shown, compact, extra, folded.length === 0);
+  return { shown, folded, collapsed, quota, height };
+}
+
+export function contextLevel(percent) {
+  if (percent >= CONTEXT_CRITICAL) return "critical";
+  return percent >= CONTEXT_WARNING ? "warning" : "";
+}
+
+export function infoTitle(info) {
+  if (!info) return "";
+  const parts = [];
+  if (info.model) parts.push(info.model);
+  if (info.contextPercent != null) parts.push(`context ${Math.round(info.contextPercent)} %`);
+  if (info.costUsd) parts.push(`$${info.costUsd.toFixed(2)}`);
+  return parts.join(" · ");
 }
 
 export const LIMIT_PERCENT = 90;

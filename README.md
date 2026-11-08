@@ -113,6 +113,10 @@ Everything is set from the menu and stored in `settings.json` in the data folder
 
 Environment variables override locations, mostly for tests: `CLAUDE_WIDGET_SESSIONS_DIR` (default `~/.claude/sessions`), `CLAUDE_WIDGET_DATA_DIR`, and `CLAUDE_CONFIG_DIR` (the Claude Code configuration folder, default `~/.claude`).
 
+## Log
+
+The widget records what it does in `widget.log` in the data folder (tray menu: *Open log folder*), one JSON object per line with a UTC timestamp (`t`), the writing process (`pid`) and an `event` name. It covers startup and shutdown with the settings in force, session starts, ends and state changes (with the raw status), context and cost changes, running agents, quota figures, notifications, menu actions, hook registration, shortcut registration and presses, window visibility, position and height, the calls Claude Code makes to the status line commands, panics, and a heartbeat every five minutes. Session names and folders are recorded; tokens and prompts never are. The file is rotated at 4 MB, keeping one previous `widget.log.1`.
+
 ## How it works
 
 Claude Code writes one JSON file per live session (pid, name, working directory, status, timestamps) to `~/.claude/sessions`. The Rust backend reads that folder every second and sends the result to the page.

@@ -226,6 +226,12 @@ try {
     [void](Click-Menu 'shortcut_off')
     Check 'menu: shortcut can be cleared' (Wait-Until { (Read-Settings).Shortcut -eq '' })
 
+    $log = Join-Path $appdata 'widget.log'
+    $events = @(Get-Content $log | ForEach-Object { ($_ | ConvertFrom-Json).event })
+    foreach ($kind in 'start', 'session_seen', 'session_state', 'session_end', 'menu', 'settings', 'hook', 'shortcut') {
+        Check "log records $kind" ($events -contains $kind) (($events | Select-Object -Unique) -join ',')
+    }
+
     Stop-Process $a, $c -Force
     Check 'no live session: empty state' ((Wait-Until { (Page-State).empty } 10) -and (Wait-Until { Height-Is $hwnd 0 }))
 
@@ -242,6 +248,7 @@ try {
     $hidden = Wait-Until { -not [Win]::IsWindowVisible($hwnd) }
     $savedHidden = Wait-Until { -not (Read-Settings).WidgetVisible }
     Check 'menu: hide widget' ($hidden -and $savedHidden) "hidden=$hidden saved=$savedHidden settings=$(Get-Content (Join-Path $appdata 'settings.json') -Raw)"
+    Check 'log records the visibility change' ([bool](Select-String -Path (Join-Path $appdata 'widget.log') -Pattern '"event":"visibility"' -Quiet))
     Stop-App
     $app = Start-Process $exe -PassThru
     Start-Sleep -Seconds 2

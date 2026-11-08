@@ -5,6 +5,7 @@ mod focus;
 mod hook;
 mod info;
 mod limit;
+mod log;
 mod notify;
 mod quota;
 mod sessions;
@@ -14,6 +15,7 @@ mod tray;
 use hook::Hook;
 use quota::Quotas;
 use serde::Serialize;
+use serde_json::json;
 use sessions::{Kind, Session};
 use settings::Settings;
 use std::{
@@ -46,6 +48,7 @@ const SHORTCUTS: [&str; 3] = [
     "CommandOrControl+Alt+W",
     "CommandOrControl+Alt+Space",
 ];
+const HEARTBEAT: Duration = Duration::from_secs(300);
 const KEEP_PER_SESSION_FILES: Duration = Duration::from_secs(7 * 24 * 3600);
 
 #[derive(Default)]
@@ -117,6 +120,7 @@ fn get_state(app: AppHandle) -> Payload {
 
 #[tauri::command]
 fn fit(window: WebviewWindow, height: f64) {
+    log::event("fit", json!({ "height": height }));
     let _ = window.set_size(LogicalSize::new(WIDTH, height));
 }
 
@@ -148,7 +152,12 @@ fn open_session(app: AppHandle, pid: u32) {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        if !focus::focus(pid, &folder) {
+        let focused = focus::focus(pid, &folder);
+        log::event(
+            "open_session",
+            json!({ "pid": pid, "folder": folder, "focused": focused }),
+        );
+        if !focused {
             open_folder(std::path::Path::new(&session.cwd));
         }
     }
@@ -166,6 +175,7 @@ fn set_visible(app: &AppHandle, visible: bool) {
             window.hide()
         };
     }
+    log::event("visibility", json!({ "visible": visible }));
     let state = app.state::<AppState>();
     let mut settings = state.settings.lock().unwrap();
     settings.widget_visible = visible;
@@ -273,6 +283,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .checked(autostart)
         .build(app)?;
     let folder = MenuItemBuilder::with_id("folder", "Open sessions folder").build(app)?;
+    let log_folder = MenuItemBuilder::with_id("log_folder", "Open log folder").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
     MenuBuilder::new(app)
@@ -295,6 +306,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &startup,
             &PredefinedMenuItem::separator(app)?,
             &folder,
+            &log_folder,
             &quit,
         ])
         .build()
@@ -350,6 +362,7 @@ fn refresh_menu(app: &AppHandle) {
 
 fn handle_menu(app: &AppHandle, id: &str) {
     let state = app.state::<AppState>();
+    log::event("menu", json!({ "id": id }));
     match id {
         "show" => set_visible(app, !is_visible(app)),
         "top" => {
@@ -413,7 +426,11 @@ fn handle_menu(app: &AppHandle, id: &str) {
             };
         }
         "folder" => open_folder(&sessions::dir()),
-        "quit" => app.exit(0),
+        "log_folder" => open_folder(&settings::data_dir()),
+        "quit" => {
+            log::event("shutdown", json!({ "reason": "menu" }));
+            app.exit(0);
+        }
         _ => {
             if let Some(pct) = id
                 .strip_prefix("opacity_")
@@ -432,8 +449,13 @@ fn handle_menu(app: &AppHandle, id: &str) {
             }
         }
     }
+    log::event("settings", settings_json(&state));
     push_state(app);
     refresh_menu(app);
+}
+
+fn settings_json(state: &AppState) -> serde_json::Value {
+    serde_json::to_value(&*state.settings.lock().unwrap()).unwrap_or_default()
 }
 
 fn toggle(state: &AppState, field: impl FnOnce(&mut Settings) -> &mut bool) {
@@ -444,6 +466,15 @@ fn toggle(state: &AppState, field: impl FnOnce(&mut Settings) -> &mut bool) {
 }
 
 fn apply_shortcut(app: &AppHandle, spec: &str) -> Result<(), String> {
+    let result = register_shortcut(app, spec);
+    log::event(
+        "shortcut",
+        json!({ "spec": spec, "error": result.as_ref().err() }),
+    );
+    result
+}
+
+fn register_shortcut(app: &AppHandle, spec: &str) -> Result<(), String> {
     let shortcuts = app.global_shortcut();
     shortcuts.unregister_all().map_err(|e| e.to_string())?;
     if spec.is_empty() {
@@ -452,6 +483,7 @@ fn apply_shortcut(app: &AppHandle, spec: &str) -> Result<(), String> {
     shortcuts
         .on_shortcut(spec, |app, _, event| {
             if event.state() == ShortcutState::Pressed {
+                log::event("shortcut_pressed", json!({}));
                 set_visible(app, !is_visible(app));
                 refresh_menu(app);
             }
@@ -496,6 +528,13 @@ impl Feature {
         }
     }
 
+    fn name(self) -> &'static str {
+        match self {
+            Feature::Quotas => "quotas",
+            Feature::Agents => "agents",
+        }
+    }
+
     fn enabled(self, settings: &Settings) -> bool {
         match self {
             Feature::Quotas => settings.show_quotas,
@@ -524,6 +563,10 @@ fn toggle_feature(app: &AppHandle, feature: Feature) {
     } else {
         feature.hook().disable(&hook::claude_settings_file())
     };
+    log::event(
+        "hook",
+        json!({ "feature": feature.name(), "enable": enable, "error": result.as_ref().err() }),
+    );
     match result {
         Ok(()) => {
             let mut settings = state.settings.lock().unwrap();
@@ -562,16 +605,32 @@ fn run_cli() -> Option<i32> {
     match std::env::args().nth(1)?.as_str() {
         "--statusline" => {
             let input = read_stdin();
-            if let Some(quotas) = quota::parse_status(&input) {
-                quota::save(&quotas);
+            let quotas = quota::parse_status(&input);
+            if let Some(quotas) = &quotas {
+                quota::save(quotas);
             }
-            if let Some((session_id, info)) = info::parse_status(&input) {
-                info::save(&session_id, &info);
+            let info = info::parse_status(&input);
+            if let Some((session_id, info)) = &info {
+                info::save(session_id, info);
             }
+            log::event(
+                "statusline",
+                json!({ "bytes": input.len(), "quotas": quotas.is_some(),
+                        "sessionId": info.as_ref().map(|(id, _)| id),
+                        "info": info.as_ref().map(|(_, i)| i) }),
+            );
             Some(0)
         }
         "--subagent-status" => {
-            if let Some((session_id, tasks)) = agents::parse_input(&read_stdin()) {
+            let input = read_stdin();
+            let parsed = agents::parse_input(&input);
+            log::event(
+                "subagent_status",
+                json!({ "bytes": input.len(), "parsed": parsed.is_some(),
+                        "sessionId": parsed.as_ref().map(|(id, _)| id),
+                        "tasks": parsed.as_ref().map(|(_, t)| t.len()) }),
+            );
+            if let Some((session_id, tasks)) = parsed {
                 agents::save(&session_id, tasks, now_secs() * 1000);
             }
             Some(0)
@@ -644,6 +703,9 @@ fn place_window(window: &WebviewWindow, settings: &Settings) {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        log::event("panic", json!({ "message": info.to_string() }));
+    }));
     if let Some(code) = run_cli() {
         std::process::exit(code);
     }
@@ -673,6 +735,12 @@ fn main() {
             let handle = app.handle().clone();
             let settings = handle.state::<AppState>().settings.lock().unwrap().clone();
             let window = main_window(&handle).expect("main window is declared in tauri.conf.json");
+            log::event(
+                "start",
+                json!({ "version": env!("CARGO_PKG_VERSION"), "os": std::env::consts::OS,
+                        "exe": std::env::current_exe().ok(),
+                        "settings": settings_json(&handle.state::<AppState>()) }),
+            );
 
             window.set_always_on_top(settings.always_on_top)?;
             window.set_ignore_cursor_events(settings.click_through)?;
@@ -681,7 +749,13 @@ fn main() {
                 if !feature.enabled(&settings) {
                     continue;
                 }
-                if let Err(message) = feature.register() {
+                let result = feature.register();
+                log::event(
+                    "hook",
+                    json!({ "feature": feature.name(), "enable": true, "startup": true,
+                            "error": result.as_ref().err() }),
+                );
+                if let Err(message) = result {
                     set_notice(&handle, message);
                 }
             }
@@ -733,6 +807,8 @@ fn main() {
 
             thread::spawn(move || {
                 let mut last_snapshot = String::new();
+                let mut tracker = log::Tracker::default();
+                let mut last_beat = Instant::now();
                 let mut watcher = notify::Watcher::default();
                 loop {
                     let mut list = sessions::read(&sessions::dir());
@@ -745,20 +821,37 @@ fn main() {
                             session.info = info::load(&session.session_id);
                         }
                     }
+                    for (kind, data) in tracker.sessions(&list) {
+                        log::event(kind, data);
+                    }
                     for (reason, name) in watcher.sessions(&list) {
-                        match reason {
-                            notify::Reason::NeedsYou if options.notify_attention => {
-                                notify::show(&handle, &name, "Needs you");
-                            }
-                            notify::Reason::Finished if options.notify_finished => {
-                                notify::show(&handle, &name, "Finished");
-                            }
-                            _ => {}
+                        let (enabled, text) = match reason {
+                            notify::Reason::NeedsYou => (options.notify_attention, "Needs you"),
+                            notify::Reason::Finished => (options.notify_finished, "Finished"),
+                        };
+                        log::event(
+                            "notification",
+                            json!({ "session": name, "text": text, "enabled": enabled }),
+                        );
+                        if enabled {
+                            notify::show(&handle, &name, text);
                         }
                     }
+                    let now = now_secs();
+                    let quotas = quota::load(now);
+                    if let Some(figures) = tracker.quotas(&quotas) {
+                        log::event(
+                            "quotas",
+                            json!({ "shown": options.show_quotas, "figures": figures,
+                                    "rejections": limit::active(now).len() }),
+                        );
+                    }
                     if options.notify_quota {
-                        let now = now_secs();
-                        for message in watcher.quotas(&quota::load(now), now) {
+                        for message in watcher.quotas(&quotas, now) {
+                            log::event(
+                                "notification",
+                                json!({ "session": "Claude usage", "text": message, "enabled": true }),
+                            );
                             notify::show(&handle, "Claude usage", &message);
                         }
                     }
@@ -772,11 +865,22 @@ fn main() {
                     push_state(&handle);
 
                     if snapshot != last_snapshot {
+                        log::event("tray", json!({ "snapshot": snapshot }));
                         last_snapshot = snapshot;
                         update_tray(&handle);
                     }
                     if state.position_dirty.swap(false, Ordering::SeqCst) {
-                        state.settings.lock().unwrap().save();
+                        let settings = state.settings.lock().unwrap();
+                        settings.save();
+                        log::event("position", json!({ "x": settings.x, "y": settings.y }));
+                    }
+                    if last_beat.elapsed() >= HEARTBEAT {
+                        last_beat = Instant::now();
+                        let visible = is_visible(&handle);
+                        log::event(
+                            "heartbeat",
+                            json!({ "sessions": state.sessions.lock().unwrap().len(), "visible": visible }),
+                        );
                     }
                     thread::sleep(Duration::from_secs(1));
                 }

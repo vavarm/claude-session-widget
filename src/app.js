@@ -24,7 +24,7 @@ let lastHeight = 0;
 function quotaHtml(quota) {
   if (!quota.bars.length) return "";
   const bars = quota.bars.map(({ name, percent, limit }) => `
-    <div class="quota ${limit ? "limit" : percent >= 70 ? "high" : ""}">
+    <div class="quota ${limit ? "limit" : percent >= 70 ? "high" : ""}"${percent == null ? ` title="No current figure: Claude Code only reports it in terminal sessions"` : ""}>
       <span class="quota-name">${name}</span>
       <span class="quota-bar"><i style="width: ${percent ?? 0}%"></i></span>
       <span class="quota-percent">${percent == null ? "\u2013" : `${percent}%`}</span>

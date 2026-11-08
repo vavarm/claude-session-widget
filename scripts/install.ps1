@@ -16,14 +16,6 @@ Directory that receives the Start Menu shortcut. Defaults to the current user's 
 .PARAMETER Autostart
 Start the widget when Windows starts. Without this switch an existing autostart entry is left as is.
 
-.PARAMETER Context
-Show each session's context use, model and cost. This registers the widget as Claude Code's status line
-in ~/.claude/settings.json (an existing status line is never replaced). Can also be toggled from the tray menu.
-
-.PARAMETER Agents
-Show running agents and background tasks under each session. This registers the widget as Claude Code's
-subagent status line in ~/.claude/settings.json (an existing one is never replaced). Can also be toggled from the tray menu.
-
 .PARAMETER NoLaunch
 Do not start the widget after installing.
 #>
@@ -32,8 +24,6 @@ param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'ClaudeSessionWidget\app'),
     [string]$StartMenuDir = [Environment]::GetFolderPath('Programs'),
     [switch]$Autostart,
-    [switch]$Context,
-    [switch]$Agents,
     [switch]$NoLaunch
 )
 
@@ -91,14 +81,6 @@ $link.Description = 'Always-on-top widget that tracks your Claude Code sessions'
 $link.Save()
 
 if ($Autostart) { Set-Autostart $exe }
-
-foreach ($option in @(@($Context, 'context'), @($Agents, 'agents'))) {
-    if ($option[0]) {
-        # Piping the output makes PowerShell wait for this GUI-subsystem executable to finish.
-        $message = & $exe "--enable-$($option[1])" | Out-String
-        if ($LASTEXITCODE -ne 0) { Write-Warning "Option '$($option[1])' was not enabled: $($message.Trim())" }
-    }
-}
 
 $version = (Get-Item $exe).VersionInfo.ProductVersion
 Write-Host "Installed Claude Session Widget $version to $InstallDir"

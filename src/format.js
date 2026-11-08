@@ -82,7 +82,6 @@ export function infoTitle(info) {
   const parts = [];
   if (info.model) parts.push(info.model);
   if (info.contextPercent != null) parts.push(`context ${Math.round(info.contextPercent)} %`);
-  if (info.costUsd) parts.push(`$${info.costUsd.toFixed(2)}`);
   return parts.join(" · ");
 }
 

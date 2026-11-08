@@ -168,31 +168,34 @@ try {
     Check 'menu: opacity 60 %' ((Click-Menu 'opacity_60') -and (Wait-Until { [Math]::Abs((Read-Settings).Opacity - 0.6) -lt 0.01 }) -and (Wait-Until { (Cdp-Eval "document.getElementById('card').style.getPropertyValue('--opacity')") -eq '0.6' }))
     Check 'menu: always-on-top off' ((Click-Menu 'top') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 8) -eq 0 }) -and -not (Read-Settings).AlwaysOnTop)
 
-    $status = @{ session_id = 'sess-bravo'; model = @{ display_name = 'Opus' }; context_window = @{ used_percentage = 42 } } | ConvertTo-Json -Compress -Depth 4
-    # PowerShell does not feed a pipe to a GUI-subsystem executable, so stdin comes from a file.
-    $statusFile = Join-Path $work 'status.json'
-    [IO.File]::WriteAllText($statusFile, $status)
-    Start-Process $exe -ArgumentList '--statusline' -RedirectStandardInput $statusFile -Wait -WindowStyle Hidden
-    Check 'status line helper stores the session info' (Get-ChildItem (Join-Path $appdata 'info') -Filter '*sess-bravo*' -ErrorAction SilentlyContinue)
-    Check 'context stays hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.ctx').length") -eq 0)
-    Check 'menu: context on shows the context bar and model' ((Click-Menu 'context') -and (Wait-Until { (Cdp-Eval "document.querySelector('.row.busy .ctx b')?.style.width") -eq '42%' }) -and ((Cdp-Eval "document.querySelector('.row.busy').title") -match 'Opus.*context 42 %') -and (Read-Settings).ShowContext)
-    Check 'context turns on the Claude Code status line' ((Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -match 'ClaudeSessionWidget.*--statusline')
-    Check 'menu: context off hides it and removes the status line' ((Click-Menu 'context') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.ctx').length") -eq 0 }) -and (Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -notmatch 'statusLine')
+    # Claude Code's own records: the conversation of bravo, and the subagents it started.
+    $project = Join-Path $env:CLAUDE_CONFIG_DIR 'projects\p1'
+    $subagents = Join-Path $project 'sess-bravo\subagents'
+    New-Item -ItemType Directory $subagents -Force | Out-Null
+    $utf8 = New-Object Text.UTF8Encoding $false
+    $assistant = '{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":82998}}}'
+    [IO.File]::WriteAllText((Join-Path $project 'sess-bravo.jsonl'), "$assistant`n", $utf8)
+    function Write-Agent($name, $type, $description, $finished) {
+        [IO.File]::WriteAllText((Join-Path $subagents "$name.jsonl"), "{}`n", $utf8)
+        [IO.File]::WriteAllText((Join-Path $subagents "$name.meta.json"), (@{ agentType = $type; description = $description; finished = $finished } | ConvertTo-Json -Compress), $utf8)
+    }
+    Write-Agent 'agent-t1' 'Explore' 'Find the auth code' $false
+    Start-Sleep -Milliseconds 100
+    Write-Agent 'agent-t2' 'general-purpose' 'Check the tests' $false
+    Write-Agent 'agent-t3' 'Plan' 'Done already' $true
 
-    $started = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() - 90000
-    $tasks = @{ session_id = 'sess-bravo'; tasks = @(
-        @{ id = 't1'; type = 'local_agent'; agentType = 'Explore'; status = 'running'; description = 'Find the auth code'; startTime = $started },
-        @{ id = 't2'; type = 'local_bash'; status = 'running'; description = 'npm test'; startTime = $started + 1000 },
-        @{ id = 't3'; type = 'local_agent'; status = 'completed'; description = 'Done already'; startTime = $started }) } | ConvertTo-Json -Compress -Depth 5
-    $tasksFile = Join-Path $work 'tasks.json'
-    [IO.File]::WriteAllText($tasksFile, $tasks)
-    Start-Process $exe -ArgumentList '--subagent-status' -RedirectStandardInput $tasksFile -Wait -WindowStyle Hidden
+    Check 'context stays hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.ctx').length") -eq 0)
+    Check 'menu: context on shows the context bar and model' ((Click-Menu 'context') -and (Wait-Until { (Cdp-Eval "document.querySelector('.row.busy .ctx b')?.style.width") -eq '42%' }) -and ((Cdp-Eval "document.querySelector('.row.busy').title") -match 'opus.*context 42 %') -and (Read-Settings).ShowContext)
+    Check 'menu: context off hides it' ((Click-Menu 'context') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.ctx').length") -eq 0 }))
+    Check 'the widget leaves the Claude Code settings alone' (-not (Test-Path (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json')))
+
     Check 'agents stay hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.agent').length") -eq 0)
-    Check 'menu: agents on lists the running agent and background task' ((Click-Menu 'agents') -and (Wait-Until { (Cdp-Eval "[...document.querySelectorAll('.agent span:first-child')].map(e => e.textContent).join('|')") -eq 'Explore: Find the auth code|npm test' }) -and (Wait-Until { Height-Is $hwnd 3 $false 32 }) -and (Read-Settings).ShowAgents) "got $(Win-Height $hwnd)"
-    Check 'agents register the subagent status line' ((Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -match 'subagentStatusLine')
+    Check 'menu: agents on lists the running subagents only' ((Click-Menu 'agents') -and (Wait-Until { (Cdp-Eval "[...document.querySelectorAll('.agent span:first-child')].map(e => e.textContent).join('|')") -eq 'Explore: Find the auth code|general-purpose: Check the tests' }) -and (Wait-Until { Height-Is $hwnd 3 $false 32 }) -and (Read-Settings).ShowAgents) "got $(Win-Height $hwnd)"
     Check 'menu: compact mode hides agent lines but keeps a count' ((Click-Menu 'compact') -and (Wait-Until { Height-Is $hwnd 3 $true }) -and (Wait-Until { (Cdp-Eval "document.querySelector('.badge')?.textContent") -eq '2' })) "got $(Win-Height $hwnd)"
     [void](Click-Menu 'compact')
-    Check 'menu: agents off hides them and removes the subagent status line' ((Click-Menu 'agents') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.agent').length") -eq 0 }) -and (Wait-Until { Height-Is $hwnd 3 }) -and (Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -notmatch 'subagentStatusLine')
+    Write-Agent 'agent-t2' 'general-purpose' 'Check the tests' $true
+    Check 'a finished subagent disappears' (Wait-Until { (Cdp-Eval "document.querySelectorAll('.agent').length") -eq 1 })
+    Check 'menu: agents off hides them' ((Click-Menu 'agents') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.agent').length") -eq 0 }) -and (Wait-Until { Height-Is $hwnd 3 }))
 
     Check 'menu: lock position is saved and reaches the page' ((Click-Menu 'locked') -and (Wait-Until { (Read-Settings).Locked }))
     [void](Click-Menu 'locked')
@@ -225,7 +228,7 @@ try {
 
     $log = Join-Path $appdata 'widget.log'
     $events = @(Get-Content $log | ForEach-Object { ($_ | ConvertFrom-Json).event })
-    foreach ($kind in 'start', 'session_seen', 'session_state', 'session_end', 'menu', 'settings', 'hook', 'shortcut') {
+    foreach ($kind in 'start', 'session_seen', 'session_state', 'session_end', 'menu', 'settings', 'session_info', 'session_agents', 'shortcut') {
         Check "log records $kind" ($events -contains $kind) (($events | Select-Object -Unique) -join ',')
     }
 

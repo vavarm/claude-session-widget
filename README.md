@@ -9,11 +9,11 @@ A small always-on-top widget that shows your running [Claude Code](https://claud
 - The tray icon is the app icon with a dot in the colour of the most urgent state. Its menu covers show/hide, always on top, compact mode, opacity and start at login.
 - Double-click a session to bring its terminal or editor window to the front (the project folder opens if no window is found).
 - Placement: lock the position, exact position in pixels (nudge buttons), click-through.
-- Optional context bar per session, with its model and cost on hover.
+- Optional context bar per session, with its model on hover.
 - Optional agents and background tasks: the running ones are listed under their session.
 - Optional notifications when a session needs you or finishes.
 - Optional layout helpers: fold sessions idle for an hour, collapse to the header while nothing runs, and a global show/hide shortcut.
-- Reads the session files Claude Code already writes, and makes no network access. Only the two options below touch your Claude Code setup, and only if you turn them on (see [Optional features](#optional-features)).
+- Only reads the files Claude Code already writes under `~/.claude`: it changes nothing in your Claude Code setup and makes no network access.
 - Windows, macOS and Linux (see [platform status](#platform-status)).
 
 Unofficial project, not affiliated with Anthropic.
@@ -56,7 +56,7 @@ The first build compiles all dependencies and takes several minutes. The new bui
 | Installed to | `%LOCALAPPDATA%\ClaudeSessionWidget\app` | `~/.local/share/ClaudeSessionWidget/app` (Linux), `~/Library/Application Support/ClaudeSessionWidget/app` (macOS) |
 | Launcher | Start Menu shortcut | Desktop entry (Linux only) |
 
-Options: `-InstallDir`, `-StartMenuDir`, `-Autostart`, `-Context`, `-Agents`, `-NoLaunch` on Windows; `--install-dir`, `--context`, `--agents`, `--no-launch` on Linux and macOS (use the tray menu for start at login there).
+Options: `-InstallDir`, `-StartMenuDir`, `-Autostart`, `-NoLaunch` on Windows; `--install-dir`, `--no-launch` on Linux and macOS (use the tray menu for start at login there).
 
 **Update** with `scripts/update.sh` or `scripts\update.ps1`: it runs `git pull --ff-only`, then reinstalls. Settings and the start-at-login choice are kept.
 
@@ -86,18 +86,16 @@ Placement options in the tray menu:
 
 ## Optional features
 
-Both are off by default. Enable them from the tray menu or at install time.
+Both are off by default and switched on from the tray menu.
 
-- **Show session context and cost** (`-Context` / `--context`) draws a thin context bar at the bottom of each session (orange from 80 %, red from 95 %); hovering a session shows its model, context and cost.
-- **Show agents and background tasks** (`-Agents` / `--agents`) lists the running subagents and background tasks under their session (up to three lines, the rest folded into "+N more"). In compact mode a small counter replaces the lines.
+- **Show session context** draws a thin context bar at the bottom of each session (orange from 80 %, red from 95 %); hovering a session shows its model and context.
+- **Show agents** lists the subagents a session has started and that have not reported back yet (up to three lines, the rest folded into "+N more"). In compact mode a small counter replaces the lines.
 
-Claude Code only hands this data to commands configured in its settings, so enabling an option registers the widget itself in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`): `ClaudeSessionWidget --statusline` as the `statusLine` for context, `ClaudeSessionWidget --subagent-status` as the `subagentStatusLine` for agents. These commands print nothing and write what they receive to the data folder; the widget makes no network request. Notes:
+Both read the transcripts Claude Code keeps in `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects`), which the terminal, the VS Code extension and the desktop app all write. Notes:
 
-- An existing `statusLine` or `subagentStatusLine` is never replaced. If you already have one, the option is refused and the widget says so.
-- Turning an option off, and uninstalling, remove the entry again. The other settings in the file are left as they are.
-- The `statusLine` command is known to run in terminal sessions; the VS Code extension and the desktop app do not appear to run it, so their sessions have no context bar.
-- Agent lines disappear after 30 seconds without an update.
-- Which kinds of background work appear in the agent list depends on what Claude Code puts in its agent panel; the widget shows every running entry it receives.
+- The context is the size of the last request of the conversation. The transcript does not say how large the model's window is, so it is measured against 200k tokens, or against 1M once the conversation has gone past 200k. Treat it as an estimate.
+- A subagent counts as running until its record says it finished; one that has written nothing for 15 minutes is taken for a crashed one and dropped.
+- Background shell commands are not shown: Claude Code does not record them with the subagents.
 
 **Notifications** (tray menu only) can be switched on separately for a session that needs you and for a session that finishes (busy to idle). They are system notifications and never replay what was already true when you turn them on. Whether "needs you" ever fires depends on the status values Claude Code writes, of which only `busy` and `idle` have been observed.
 
@@ -115,7 +113,7 @@ Environment variables override locations, mostly for tests: `CLAUDE_WIDGET_SESSI
 
 ## Log
 
-The widget records what it does in `widget.log` in the data folder (tray menu: *Open log folder*), one JSON object per line with a UTC timestamp (`t`), the writing process (`pid`) and an `event` name. It covers startup and shutdown with the settings in force, session starts, ends and state changes (with the raw status), context and cost changes, running agents, notifications, menu actions, hook registration, shortcut registration and presses, window visibility, position and height, the calls Claude Code makes to the status line commands, panics, and a heartbeat every five minutes. Session names and folders are recorded; tokens and prompts never are. The file is rotated at 4 MB, keeping one previous `widget.log.1`.
+The widget records what it does in `widget.log` in the data folder (tray menu: *Open log folder*), one JSON object per line with a UTC timestamp (`t`), the writing process (`pid`) and an `event` name. It covers startup and shutdown with the settings in force, session starts, ends and state changes (with the raw status), context changes, running agents, notifications, menu actions, shortcut registration and presses, window visibility, position and height, panics, and a heartbeat every five minutes. Session names and folders are recorded; tokens and prompts never are. The file is rotated at 4 MB, keeping one previous `widget.log.1`.
 
 ## How it works
 

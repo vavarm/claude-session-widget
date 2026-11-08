@@ -1,4 +1,4 @@
-use crate::{agents::Task, info::Info};
+use crate::transcript::{Info, Task};
 use serde::Serialize;
 use serde_json::Value;
 use std::{

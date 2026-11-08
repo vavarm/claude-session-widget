@@ -73,7 +73,6 @@ struct Seen {
     status: String,
     model: String,
     context: Option<i64>,
-    cost_cents: Option<i64>,
     agents: Vec<String>,
 }
 
@@ -90,9 +89,6 @@ fn summarize(session: &Session) -> Seen {
         context: info
             .and_then(|i| i.context_percent)
             .map(|p| p.round() as i64),
-        cost_cents: info
-            .and_then(|i| i.cost_usd)
-            .map(|c| (c * 100.0).round() as i64),
         agents: session
             .agents
             .iter()
@@ -140,13 +136,11 @@ impl Tracker {
                             "to": { "kind": now.kind, "status": now.status } }),
                 ));
             }
-            if (&before.model, before.context, before.cost_cents)
-                != (&now.model, now.context, now.cost_cents)
-            {
+            if (&before.model, before.context) != (&now.model, now.context) {
                 events.push((
                     "session_info",
                     json!({ "pid": session.pid, "name": now.name, "model": now.model,
-                            "contextPercent": now.context, "costUsd": now.cost_cents.map(|c| c as f64 / 100.0) }),
+                            "contextPercent": now.context }),
                 ));
             }
             if before.agents != now.agents {
@@ -172,7 +166,7 @@ impl Tracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{info::Info, sessions::Kind};
+    use crate::{sessions::Kind, transcript::Info};
 
     fn session(pid: u32, kind: Kind, status: &str) -> Session {
         Session {
@@ -236,19 +230,16 @@ mod tests {
         s.info = Some(Info {
             model: "Opus".into(),
             context_percent: Some(41.6),
-            cost_usd: Some(1.234),
         });
         let events = tracker.sessions(&[s.clone()]);
         assert_eq!(names(&events), ["session_info"]);
         assert_eq!(events[0].1["contextPercent"], 42);
         assert!(tracker.sessions(&[s.clone()]).is_empty());
 
-        s.agents.push(crate::agents::Task {
+        s.agents.push(crate::transcript::Task {
             id: "a".into(),
-            name: String::new(),
-            kind: "local_agent".into(),
+            kind: "agent".into(),
             agent_type: "Explore".into(),
-            status: "running".into(),
             description: "Find".into(),
             start_time: 0,
         });

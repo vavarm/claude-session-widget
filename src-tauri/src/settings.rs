@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "PascalCase", default)]
@@ -53,44 +50,6 @@ pub fn data_dir() -> PathBuf {
         None => dirs::config_dir()
             .unwrap_or_default()
             .join("ClaudeSessionWidget"),
-    }
-}
-
-// Several Claude Code sessions write the same files at once; renaming keeps readers from seeing a half-written one.
-pub fn write_atomically(file: &Path, text: &str) {
-    if let Some(dir) = file.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    let temp = file.with_extension("tmp");
-    if fs::write(&temp, text).is_ok() {
-        let _ = fs::rename(&temp, file);
-    }
-}
-
-// Session ids become file names, so anything but a plain identifier is refused.
-pub fn session_file(dir: &Path, session_id: &str) -> Option<PathBuf> {
-    let plain = !session_id.is_empty()
-        && session_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    plain.then(|| dir.join(format!("{session_id}.json")))
-}
-
-// Per-session files of sessions long gone are not worth keeping.
-pub fn prune_older_than(dir: &Path, age: std::time::Duration) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let old = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|elapsed| elapsed > age);
-        if old {
-            let _ = fs::remove_file(entry.path());
-        }
     }
 }
 

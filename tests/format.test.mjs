@@ -99,12 +99,12 @@ test("layout collapses to the header only while nothing runs and the pointer is 
   assert.equal(layout(withState([live("idle")]), false, NOW).collapsed, false);
 });
 
-test("contextLevel and infoTitle describe a session's context and cost", () => {
+test("contextLevel and infoTitle describe a session's context", () => {
   assert.equal(contextLevel(50), "");
   assert.equal(contextLevel(80), "warning");
   assert.equal(contextLevel(97), "critical");
-  assert.equal(infoTitle({ model: "Opus", contextPercent: 42.4, costUsd: 1.234 }), "Opus · context 42 % · $1.23");
-  assert.equal(infoTitle({ model: "", contextPercent: null, costUsd: 0 }), "");
+  assert.equal(infoTitle({ model: "Opus", contextPercent: 42.4 }), "Opus · context 42 %");
+  assert.equal(infoTitle({ model: "", contextPercent: null }), "");
   assert.equal(infoTitle(null), "");
 });
 

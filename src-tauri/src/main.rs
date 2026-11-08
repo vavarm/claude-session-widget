@@ -1,28 +1,24 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod agents;
 mod focus;
-mod hook;
-mod info;
 mod log;
 mod notify;
 mod sessions;
 mod settings;
+mod transcript;
 mod tray;
 
-use hook::Hook;
 use serde::Serialize;
 use serde_json::json;
 use sessions::{Kind, Session};
 use settings::Settings;
 use std::{
-    io::{Read, Write},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
     },
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use tauri::{
     menu::{
@@ -46,7 +42,6 @@ const SHORTCUTS: [&str; 3] = [
     "CommandOrControl+Alt+Space",
 ];
 const HEARTBEAT: Duration = Duration::from_secs(300);
-const KEEP_PER_SESSION_FILES: Duration = Duration::from_secs(7 * 24 * 3600);
 
 #[derive(Default)]
 struct AppState {
@@ -66,12 +61,6 @@ struct Payload {
     fold_idle: bool,
     auto_collapse: bool,
     notice: Option<String>,
-}
-
-fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
 
 fn payload(app: &AppHandle) -> Payload {
@@ -213,16 +202,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             .checked(checked)
             .build(app)
     };
-    let context = check(
-        "context",
-        "Show session context and cost",
-        settings.show_context,
-    )?;
-    let agents = check(
-        "agents",
-        "Show agents and background tasks",
-        settings.show_agents,
-    )?;
+    let context = check("context", "Show session context", settings.show_context)?;
+    let agents = check("agents", "Show agents", settings.show_agents)?;
     let fold_idle = check(
         "fold_idle",
         "Fold sessions idle for an hour",
@@ -384,8 +365,8 @@ fn handle_menu(app: &AppHandle, id: &str) {
                 let _ = window.set_ignore_cursor_events(enabled);
             }
         }
-        "context" => toggle_feature(app, Feature::Context),
-        "agents" => toggle_feature(app, Feature::Agents),
+        "context" => toggle(&state, |s| &mut s.show_context),
+        "agents" => toggle(&state, |s| &mut s.show_agents),
         "fold_idle" => toggle(&state, |s| &mut s.fold_idle),
         "auto_collapse" => toggle(&state, |s| &mut s.auto_collapse),
         "notify_attention" => toggle(&state, |s| &mut s.notify_attention),
@@ -498,135 +479,6 @@ fn choose_shortcut(app: &AppHandle, spec: &str) {
     }
 }
 
-// Options that need Claude Code to feed the widget through a settings.json command.
-#[derive(Clone, Copy)]
-enum Feature {
-    Context,
-    Agents,
-}
-
-impl Feature {
-    fn hook(self) -> Hook {
-        match self {
-            Feature::Context => hook::STATUS_LINE,
-            Feature::Agents => hook::SUBAGENT_STATUS_LINE,
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Feature::Context => "context",
-            Feature::Agents => "agents",
-        }
-    }
-
-    fn enabled(self, settings: &Settings) -> bool {
-        match self {
-            Feature::Context => settings.show_context,
-            Feature::Agents => settings.show_agents,
-        }
-    }
-
-    fn set(self, settings: &mut Settings, on: bool) {
-        match self {
-            Feature::Context => settings.show_context = on,
-            Feature::Agents => settings.show_agents = on,
-        }
-    }
-
-    fn register(self) -> Result<(), String> {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        self.hook().enable(&hook::claude_settings_file(), &exe)
-    }
-}
-
-fn toggle_feature(app: &AppHandle, feature: Feature) {
-    let state = app.state::<AppState>();
-    let enable = !feature.enabled(&state.settings.lock().unwrap());
-    let result = if enable {
-        feature.register()
-    } else {
-        feature.hook().disable(&hook::claude_settings_file())
-    };
-    log::event(
-        "hook",
-        json!({ "feature": feature.name(), "enable": enable, "error": result.as_ref().err() }),
-    );
-    match result {
-        Ok(()) => {
-            let mut settings = state.settings.lock().unwrap();
-            feature.set(&mut settings, enable);
-            settings.save();
-        }
-        Err(message) => set_notice(app, message),
-    }
-}
-
-fn report(result: Result<(), String>) -> i32 {
-    match result {
-        Ok(()) => 0,
-        Err(message) => {
-            let _ = writeln!(std::io::stdout(), "{message}");
-            2
-        }
-    }
-}
-
-fn read_stdin() -> String {
-    let mut input = String::new();
-    let _ = std::io::stdin().read_to_string(&mut input);
-    input
-}
-
-// Command-line modes used by Claude Code (as a status line command) and by the installers.
-fn run_cli() -> Option<i32> {
-    let enable = |feature: Feature| {
-        report(feature.register().inspect(|()| {
-            let mut settings = Settings::load();
-            feature.set(&mut settings, true);
-            settings.save();
-        }))
-    };
-    match std::env::args().nth(1)?.as_str() {
-        "--statusline" => {
-            let input = read_stdin();
-            let info = info::parse_status(&input);
-            if let Some((session_id, info)) = &info {
-                info::save(session_id, info);
-            }
-            log::event(
-                "statusline",
-                json!({ "bytes": input.len(),
-                        "sessionId": info.as_ref().map(|(id, _)| id),
-                        "info": info.as_ref().map(|(_, i)| i) }),
-            );
-            Some(0)
-        }
-        "--subagent-status" => {
-            let input = read_stdin();
-            let parsed = agents::parse_input(&input);
-            log::event(
-                "subagent_status",
-                json!({ "bytes": input.len(), "parsed": parsed.is_some(),
-                        "sessionId": parsed.as_ref().map(|(id, _)| id),
-                        "tasks": parsed.as_ref().map(|(_, t)| t.len()) }),
-            );
-            if let Some((session_id, tasks)) = parsed {
-                agents::save(&session_id, tasks, now_secs() * 1000);
-            }
-            Some(0)
-        }
-        "--enable-context" => Some(enable(Feature::Context)),
-        "--enable-agents" => Some(enable(Feature::Agents)),
-        "--remove-hooks" => Some(report(
-            hook::ALL
-                .iter()
-                .try_for_each(|h| h.disable(&hook::claude_settings_file())),
-        )),
-        _ => None,
-    }
-}
-
 fn open_folder(path: &std::path::Path) {
     let opener = if cfg!(windows) {
         "explorer.exe"
@@ -687,9 +539,6 @@ fn main() {
     std::panic::set_hook(Box::new(|info| {
         log::event("panic", json!({ "message": info.to_string() }));
     }));
-    if let Some(code) = run_cli() {
-        std::process::exit(code);
-    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             set_visible(app, true)
@@ -726,28 +575,9 @@ fn main() {
             window.set_always_on_top(settings.always_on_top)?;
             window.set_ignore_cursor_events(settings.click_through)?;
             place_window(&window, &settings);
-            for feature in [Feature::Context, Feature::Agents] {
-                if !feature.enabled(&settings) {
-                    continue;
-                }
-                let result = feature.register();
-                log::event(
-                    "hook",
-                    json!({ "feature": feature.name(), "enable": true, "startup": true,
-                            "error": result.as_ref().err() }),
-                );
-                if let Err(message) = result {
-                    set_notice(&handle, message);
-                }
-            }
             if let Err(message) = apply_shortcut(&handle, &settings.shortcut) {
                 set_notice(&handle, message);
             }
-            settings::prune_older_than(
-                &settings::data_dir().join("agents"),
-                KEEP_PER_SESSION_FILES,
-            );
-            settings::prune_older_than(&settings::data_dir().join("info"), KEEP_PER_SESSION_FILES);
             if settings.widget_visible {
                 window.show()?;
             }
@@ -794,12 +624,18 @@ fn main() {
                 loop {
                     let mut list = sessions::read(&sessions::dir());
                     let options = handle.state::<AppState>().settings.lock().unwrap().clone();
-                    for session in &mut list {
-                        if options.show_agents {
-                            session.agents = agents::load(&session.session_id, now_secs() * 1000);
-                        }
-                        if options.show_context {
-                            session.info = info::load(&session.session_id);
+                    if options.show_agents || options.show_context {
+                        let projects = transcript::projects_dir();
+                        for session in &mut list {
+                            let Some(path) = transcript::find(&projects, &session.session_id) else {
+                                continue;
+                            };
+                            if options.show_agents {
+                                session.agents = transcript::agents(&path);
+                            }
+                            if options.show_context {
+                                session.info = transcript::info(&path);
+                            }
                         }
                     }
                     for (kind, data) in tracker.sessions(&list) {

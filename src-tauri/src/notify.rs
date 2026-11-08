@@ -1,12 +1,7 @@
-use crate::{
-    quota::{Quotas, Window, STALE_MS},
-    sessions::{Kind, Session},
-};
-use std::collections::{HashMap, HashSet};
+use crate::sessions::{Kind, Session};
+use std::collections::HashMap;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
-
-pub const LIMIT_PERCENT: f64 = 90.0;
 
 #[derive(Debug, PartialEq)]
 pub enum Reason {
@@ -19,7 +14,6 @@ pub enum Reason {
 #[derive(Default)]
 pub struct Watcher {
     previous: Option<HashMap<u32, Kind>>,
-    alerted: HashSet<(&'static str, i64)>,
 }
 
 impl Watcher {
@@ -40,40 +34,6 @@ impl Watcher {
         }
         self.previous = Some(current);
         events
-    }
-
-    // One message per window and per reset period.
-    pub fn quotas(&mut self, quotas: &Quotas, now: i64) -> Vec<String> {
-        let mut messages = Vec::new();
-        if quotas.as_of.is_some_and(|at| now * 1000 - at > STALE_MS) {
-            return messages;
-        }
-        for (name, window) in [("5h", &quotas.five_hour), ("7d", &quotas.seven_day)] {
-            let Some(Window {
-                used_percentage,
-                resets_at,
-            }) = window
-            else {
-                continue;
-            };
-            if *used_percentage >= LIMIT_PERCENT && self.alerted.insert((name, *resets_at)) {
-                messages.push(format!(
-                    "{name} usage at {} %, resets in {}",
-                    used_percentage.round(),
-                    until(*resets_at - now)
-                ));
-            }
-        }
-        messages
-    }
-}
-
-fn until(seconds: i64) -> String {
-    let minutes = ((seconds + 59) / 60).max(1);
-    match minutes {
-        m if m < 60 => format!("{m}m"),
-        m if m < 24 * 60 => format!("{}h{:02}", m / 60, m % 60),
-        m => format!("{}d{:02}h", m / 1440, m % 1440 / 60),
     }
 }
 
@@ -139,46 +99,5 @@ mod tests {
         watcher.sessions(&[]);
         let events = watcher.sessions(&[session(7, "new", Kind::Attention)]);
         assert_eq!(events, vec![(Reason::NeedsYou, "new".to_string())]);
-    }
-
-    fn quotas(five: f64, seven: f64, reset: i64) -> Quotas {
-        let window = |used_percentage| {
-            Some(Window {
-                used_percentage,
-                resets_at: reset,
-            })
-        };
-        Quotas {
-            five_hour: window(five),
-            seven_day: window(seven),
-            as_of: None,
-        }
-    }
-
-    #[test]
-    fn quota_alert_fires_once_per_reset_period() {
-        let mut watcher = Watcher::default();
-        assert!(watcher.quotas(&quotas(50.0, 10.0, 5000), 1000).is_empty());
-        let first = watcher.quotas(&quotas(92.4, 10.0, 5000), 1000);
-        assert_eq!(first, vec!["5h usage at 92 %, resets in 1h07".to_string()]);
-        assert!(watcher.quotas(&quotas(95.0, 10.0, 5000), 1100).is_empty());
-        assert_eq!(watcher.quotas(&quotas(91.0, 10.0, 9000), 6000).len(), 1);
-    }
-
-    #[test]
-    fn stale_figures_never_raise_an_alert() {
-        let mut watcher = Watcher::default();
-        let mut stale = quotas(95.0, 10.0, 5000);
-        stale.as_of = Some(0);
-        assert!(watcher.quotas(&stale, 1000).is_empty());
-        assert_eq!(watcher.quotas(&quotas(95.0, 10.0, 5000), 1000).len(), 1);
-    }
-
-    #[test]
-    fn until_formats_minutes_hours_and_days() {
-        assert_eq!(until(10), "1m");
-        assert_eq!(until(25 * 60), "25m");
-        assert_eq!(until(2 * 3600 + 5 * 60), "2h05");
-        assert_eq!(until(50 * 3600), "2d02h");
     }
 }

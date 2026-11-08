@@ -151,23 +151,6 @@ html, body {
   color: var(--muted);
 }
 
-.quotas {
-  box-sizing: border-box;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  column-gap: 16px;
-  height: 26px;
-  padding: 8px 14px 0;
-}
-
-.quota { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--muted); }
-.quota-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
-.quota-bar i { display: block; height: 100%; border-radius: 2px; background: var(--idle); }
-.quota.high .quota-bar i { background: var(--busy); }
-.quota.limit .quota-bar i { background: var(--attention); }
-.quota.limit .quota-percent { color: var(--attention); }
-.quota-percent { min-width: 26px; text-align: right; }
-
 .note {
   height: 15px;
   padding: 0 14px;

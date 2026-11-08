@@ -168,19 +168,16 @@ try {
     Check 'menu: opacity 60 %' ((Click-Menu 'opacity_60') -and (Wait-Until { [Math]::Abs((Read-Settings).Opacity - 0.6) -lt 0.01 }) -and (Wait-Until { (Cdp-Eval "document.getElementById('card').style.getPropertyValue('--opacity')") -eq '0.6' }))
     Check 'menu: always-on-top off' ((Click-Menu 'top') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 8) -eq 0 }) -and -not (Read-Settings).AlwaysOnTop)
 
-    $now = [DateTimeOffset]::Now.ToUnixTimeSeconds()
-    $status = @{ session_id = 'sess-bravo'; model = @{ display_name = 'Opus' }; context_window = @{ used_percentage = 42 }; rate_limits = @{ five_hour = @{ used_percentage = 96.2; resets_at = $now + 1800 }; seven_day = @{ used_percentage = 40; resets_at = $now + 86400 } } } | ConvertTo-Json -Compress -Depth 4
+    $status = @{ session_id = 'sess-bravo'; model = @{ display_name = 'Opus' }; context_window = @{ used_percentage = 42 } } | ConvertTo-Json -Compress -Depth 4
     # PowerShell does not feed a pipe to a GUI-subsystem executable, so stdin comes from a file.
     $statusFile = Join-Path $work 'status.json'
     [IO.File]::WriteAllText($statusFile, $status)
     Start-Process $exe -ArgumentList '--statusline' -RedirectStandardInput $statusFile -Wait -WindowStyle Hidden
-    Check 'status line helper stores the quotas' ((Test-Path (Join-Path $appdata 'usage.json')) -and (Get-Content (Join-Path $appdata 'usage.json') -Raw) -match '"fiveHour"')
-    Check 'quotas stay hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.quota').length") -eq 0)
-    $extra = 26 + 15
-    Check 'menu: quotas on shows both bars and the reset of the exhausted one' ((Click-Menu 'quotas') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.quota').length") -eq 2 }) -and (Wait-Until { (Cdp-Eval "document.querySelector('.note')?.textContent") -match '^5h limit: resets in (29|30)m$' }) -and (Wait-Until { Height-Is $hwnd 3 $false $extra }) -and (Read-Settings).ShowQuotas) "got $(Win-Height $hwnd)"
-    Check 'quotas option also shows the session context bar and model' ((Wait-Until { (Cdp-Eval "document.querySelector('.row.busy .ctx b')?.style.width") -eq '42%' }) -and ((Cdp-Eval "document.querySelector('.row.busy').title") -match 'Opus.*context 42 %'))
-    Check 'quotas turn on the Claude Code status line' ((Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -match 'ClaudeSessionWidget.*--statusline')
-    Check 'menu: quotas off hides them and removes the status line' ((Click-Menu 'quotas') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.quota').length") -eq 0 }) -and (Wait-Until { Height-Is $hwnd 3 }) -and (Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -notmatch 'statusLine')
+    Check 'status line helper stores the session info' (Get-ChildItem (Join-Path $appdata 'info') -Filter '*sess-bravo*' -ErrorAction SilentlyContinue)
+    Check 'context stays hidden until enabled' ((Cdp-Eval "document.querySelectorAll('.ctx').length") -eq 0)
+    Check 'menu: context on shows the context bar and model' ((Click-Menu 'context') -and (Wait-Until { (Cdp-Eval "document.querySelector('.row.busy .ctx b')?.style.width") -eq '42%' }) -and ((Cdp-Eval "document.querySelector('.row.busy').title") -match 'Opus.*context 42 %') -and (Read-Settings).ShowContext)
+    Check 'context turns on the Claude Code status line' ((Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -match 'ClaudeSessionWidget.*--statusline')
+    Check 'menu: context off hides it and removes the status line' ((Click-Menu 'context') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.ctx').length") -eq 0 }) -and (Get-Content (Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json') -Raw) -notmatch 'statusLine')
 
     $started = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() - 90000
     $tasks = @{ session_id = 'sess-bravo'; tasks = @(
@@ -217,9 +214,9 @@ try {
     [void](Click-Menu 'auto_collapse')
     Check 'expanded again after turning collapse off' (Wait-Until { Height-Is $hwnd 2 })
 
-    foreach ($id in 'notify_attention', 'notify_finished', 'notify_quota') { [void](Click-Menu $id) }
-    Check 'menu: notification options are saved' (Wait-Until { $s = Read-Settings; $s.NotifyAttention -and $s.NotifyFinished -and $s.NotifyQuota })
-    foreach ($id in 'notify_attention', 'notify_finished', 'notify_quota') { [void](Click-Menu $id) }
+    foreach ($id in 'notify_attention', 'notify_finished') { [void](Click-Menu $id) }
+    Check 'menu: notification options are saved' (Wait-Until { $s = Read-Settings; $s.NotifyAttention -and $s.NotifyFinished })
+    foreach ($id in 'notify_attention', 'notify_finished') { [void](Click-Menu $id) }
 
     [void](Click-Menu 'shortcut_CommandOrControl+Alt+W')
     Check 'menu: shortcut is registered and saved' (Wait-Until { (Read-Settings).Shortcut -eq 'CommandOrControl+Alt+W' })

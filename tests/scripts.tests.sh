@@ -37,10 +37,10 @@ check "re-install (update path) succeeds" $?
 [ ! -e "$APP/stale.txt" ]; check "re-install replaces old files" $?
 [ -f "$CLAUDE_WIDGET_DATA_DIR/settings.json" ]; check "re-install keeps settings" $?
 
-"$ROOT/scripts/install.sh" --install-dir "$APP" --no-launch --quotas --agents >"$WORK/quotas.log" 2>&1
-check "install --quotas succeeds" $?
-grep -q 'ClaudeSessionWidget.*--statusline' "$CLAUDE_CONFIG_DIR/settings.json"; check "install --quotas registers the status line" $?
-grep -q '"ShowQuotas": *true' "$CLAUDE_WIDGET_DATA_DIR/settings.json"; check "install --quotas turns the setting on" $?
+"$ROOT/scripts/install.sh" --install-dir "$APP" --no-launch --context --agents >"$WORK/context.log" 2>&1
+check "install --context succeeds" $?
+grep -q 'ClaudeSessionWidget.*--statusline' "$CLAUDE_CONFIG_DIR/settings.json"; check "install --context registers the status line" $?
+grep -q '"ShowContext": *true' "$CLAUDE_WIDGET_DATA_DIR/settings.json"; check "install --context turns the setting on" $?
 grep -q 'subagentStatusLine' "$CLAUDE_CONFIG_DIR/settings.json"; check "install --agents registers the subagent status line" $?
 
 mkdir -p "$WORK/not-an-install"; touch "$WORK/not-an-install/precious.txt"

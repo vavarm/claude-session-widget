@@ -5,9 +5,9 @@
 # directory first, and the previous installation is only replaced once the build succeeded
 # (and restored if the copy fails). Settings are never touched.
 #
-# Usage: scripts/install.sh [--install-dir DIR] [--quotas] [--agents] [--no-launch]
+# Usage: scripts/install.sh [--install-dir DIR] [--context] [--agents] [--no-launch]
 #
-# --quotas shows the 5-hour and weekly usage quotas, --agents the running agents and background
+# --context shows each session's context use, model and cost, --agents the running agents and background
 # tasks. Both register the widget as a command in ~/.claude/settings.json (statusLine and
 # subagentStatusLine); an existing entry is never replaced.
 #
@@ -24,7 +24,7 @@ OPTIONS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --install-dir) INSTALL_DIR="$2"; shift 2 ;;
-    --quotas) OPTIONS+=(quotas); shift ;;
+    --context) OPTIONS+=(context); shift ;;
     --agents) OPTIONS+=(agents); shift ;;
     --no-launch) LAUNCH=0; shift ;;
     -h|--help) sed -n '2,13p' "$0"; exit 0 ;;

@@ -1,4 +1,4 @@
-use crate::{quota::Quotas, sessions::Session, settings};
+use crate::{sessions::Session, settings};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -101,11 +101,10 @@ fn summarize(session: &Session) -> Seen {
     }
 }
 
-// Turns successive looks at the sessions and quotas into the changes worth recording.
+// Turns successive looks at the sessions into the changes worth recording.
 #[derive(Default)]
 pub struct Tracker {
     sessions: Option<HashMap<u32, Seen>>,
-    quotas: Option<Value>,
 }
 
 impl Tracker {
@@ -167,19 +166,6 @@ impl Tracker {
         }
         self.sessions = Some(current);
         events
-    }
-
-    pub fn quotas(&mut self, quotas: &Quotas) -> Option<Value> {
-        let window = |w: &Option<crate::quota::Window>| {
-            w.as_ref()
-                .map(|w| json!({ "percent": w.used_percentage.round(), "resetsAt": w.resets_at }))
-        };
-        let value = json!({ "fiveHour": window(&quotas.five_hour), "sevenDay": window(&quotas.seven_day),
-                            "asOf": quotas.as_of.map(iso) });
-        (self.quotas.as_ref() != Some(&value)).then(|| {
-            self.quotas = Some(value.clone());
-            value
-        })
     }
 }
 
@@ -267,19 +253,6 @@ mod tests {
             start_time: 0,
         });
         assert_eq!(names(&tracker.sessions(&[s])), ["session_agents"]);
-    }
-
-    #[test]
-    fn quotas_are_recorded_only_when_they_change() {
-        let mut tracker = Tracker::default();
-        let mut quotas = Quotas::default();
-        assert!(tracker.quotas(&quotas).is_some());
-        assert!(tracker.quotas(&quotas).is_none());
-        quotas.five_hour = Some(crate::quota::Window {
-            used_percentage: 40.2,
-            resets_at: 5,
-        });
-        assert!(tracker.quotas(&quotas).is_some());
     }
 
     #[test]

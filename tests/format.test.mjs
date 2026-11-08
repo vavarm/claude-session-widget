@@ -5,13 +5,10 @@ import {
   contextLevel,
   elapsed,
   escapeHtml,
-  extraHeight,
   folderName,
   infoTitle,
   label,
   layout,
-  quotaView,
-  untilReset,
   windowHeight,
 } from "../src/format.js";
 
@@ -65,58 +62,12 @@ test("agentLines names the agent type and folds the overflow into one line", () 
   assert.equal(many.length, 3);
 });
 
-test("untilReset formats minutes, hours and days", () => {
-  assert.equal(untilReset(1000 + 30, 1000), "1m");
-  assert.equal(untilReset(1000 + 25 * 60, 1000), "25m");
-  assert.equal(untilReset(1000 + (2 * 3600 + 5 * 60), 1000), "2h05");
-  assert.equal(untilReset(1000 + (50 * 3600), 1000), "2d02h");
-  assert.equal(untilReset(900, 1000), "1m");
-});
-
-test("quotaView shows a reset note only for windows at the limit", () => {
-  const now = 1000;
-  const view = quotaView({
-    fiveHour: { usedPercentage: 95.4, resetsAt: now + 3600 },
-    sevenDay: { usedPercentage: 41.2, resetsAt: now + 86_400 },
-  }, now);
-  assert.deepEqual(view.bars, [
-    { name: "5h", percent: 95, limit: true },
-    { name: "7d", percent: 41, limit: false },
-  ]);
-  assert.deepEqual(view.notes, ["5h limit: resets in 1h00"]);
-});
-
-test("quotaView says when old figures were read, and stays silent for current ones", () => {
-  const window = { usedPercentage: 40, resetsAt: 100_000 };
-  const old = quotaView({ fiveHour: window, asOf: 1_000_000 }, 1000 + 20 * 60);
-  assert.match(old.notes[0], /^usage as of \d/);
-  assert.deepEqual(quotaView({ fiveHour: window, asOf: 1_000_000 }, 1000 + 5 * 60).notes, []);
-  assert.deepEqual(quotaView({ fiveHour: window, asOf: null }, 5000).notes, []);
-});
-
-test("quotaView keeps an empty bar for a window without a current figure", () => {
-  const view = quotaView({ sevenDay: { usedPercentage: 48, resetsAt: 5000 } }, 1000);
-  assert.deepEqual(view.bars, [
-    { name: "5h", percent: null, limit: false },
-    { name: "7d", percent: 48, limit: false },
-  ]);
-});
-
-test("quotaView copes with missing windows and absent quotas", () => {
-  assert.deepEqual(quotaView(null), { bars: [], notes: [] });
-  assert.equal(quotaView({ sevenDay: { usedPercentage: 150, resetsAt: 5000 } }, 1000).bars[1].percent, 100);
-});
-
-test("extraHeight adds the bars once and one line per note", () => {
-  const view = { bars: [{}, {}], notes: ["a"] };
-  assert.equal(extraHeight(view, null), 26 + 15);
-  assert.equal(extraHeight(view, "notice"), 26 + 30);
-  assert.equal(extraHeight({ bars: [], notes: [] }, "notice"), 15);
-  assert.equal(windowHeight(sessions(1), false, 26), 34 + 46 + 26 + 8);
+test("windowHeight adds room for extra lines", () => {
+  assert.equal(windowHeight(sessions(1), false, 15), 34 + 46 + 15 + 8);
 });
 
 const HOUR = 3_600_000;
-const withState = (list, extra = {}) => ({ sessions: list, compact: false, foldIdle: false, autoCollapse: false, quotas: null, notice: null, ...extra });
+const withState = (list, extra = {}) => ({ sessions: list, compact: false, foldIdle: false, autoCollapse: false, notice: null, ...extra });
 const live = (kind, ago = 1000) => ({ kind, sinceMs: NOW - ago, agents: [] });
 
 test("layout folds sessions idle for over an hour when asked", () => {
@@ -127,6 +78,10 @@ test("layout folds sessions idle for over an hour when asked", () => {
   assert.equal(folded.shown.length, 2);
   assert.equal(folded.folded.length, 1);
   assert.equal(folded.height, 34 + 2 * 46 + 28 + 8);
+});
+
+test("layout makes room for a notice", () => {
+  assert.equal(layout(withState([live("busy")], { notice: "hi" }), false, NOW).height, 34 + 46 + 15 + 8);
 });
 
 test("layout leaves no empty-state row when everything is folded", () => {

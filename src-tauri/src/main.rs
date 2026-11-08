@@ -4,16 +4,13 @@ mod agents;
 mod focus;
 mod hook;
 mod info;
-mod limit;
 mod log;
 mod notify;
-mod quota;
 mod sessions;
 mod settings;
 mod tray;
 
 use hook::Hook;
-use quota::Quotas;
 use serde::Serialize;
 use serde_json::json;
 use sessions::{Kind, Session};
@@ -68,7 +65,6 @@ struct Payload {
     locked: bool,
     fold_idle: bool,
     auto_collapse: bool,
-    quotas: Option<Quotas>,
     notice: Option<String>,
 }
 
@@ -89,10 +85,6 @@ fn payload(app: &AppHandle) -> Payload {
         .filter(|(_, at)| at.elapsed() < NOTICE_TTL)
         .map(|(message, _)| message.clone());
     let settings = state.settings.lock().unwrap();
-    let quotas = settings
-        .show_quotas
-        .then(|| quota::load(now_secs()))
-        .filter(|q| !q.is_empty());
     Payload {
         sessions,
         compact: settings.compact,
@@ -100,7 +92,6 @@ fn payload(app: &AppHandle) -> Payload {
         locked: settings.locked,
         fold_idle: settings.fold_idle,
         auto_collapse: settings.auto_collapse,
-        quotas,
         notice,
     }
 }
@@ -222,10 +213,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             .checked(checked)
             .build(app)
     };
-    let quotas = check(
-        "quotas",
-        "Show usage quotas and context",
-        settings.show_quotas,
+    let context = check(
+        "context",
+        "Show session context and cost",
+        settings.show_context,
     )?;
     let agents = check(
         "agents",
@@ -252,11 +243,6 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             "notify_finished",
             "A session finishes",
             settings.notify_finished,
-        )?)
-        .item(&check(
-            "notify_quota",
-            "A quota is nearly used up",
-            settings.notify_quota,
         )?)
         .build()?;
     let mut shortcut = SubmenuBuilder::new(app, "Show/hide shortcut").item(&check(
@@ -292,7 +278,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &top,
             &compact,
             &opacity,
-            &quotas,
+            &context,
             &agents,
             &fold_idle,
             &auto_collapse,
@@ -398,13 +384,12 @@ fn handle_menu(app: &AppHandle, id: &str) {
                 let _ = window.set_ignore_cursor_events(enabled);
             }
         }
-        "quotas" => toggle_feature(app, Feature::Quotas),
+        "context" => toggle_feature(app, Feature::Context),
         "agents" => toggle_feature(app, Feature::Agents),
         "fold_idle" => toggle(&state, |s| &mut s.fold_idle),
         "auto_collapse" => toggle(&state, |s| &mut s.auto_collapse),
         "notify_attention" => toggle(&state, |s| &mut s.notify_attention),
         "notify_finished" => toggle(&state, |s| &mut s.notify_finished),
-        "notify_quota" => toggle(&state, |s| &mut s.notify_quota),
         "reset_position" => {
             let settings = {
                 let mut settings = state.settings.lock().unwrap();
@@ -516,35 +501,35 @@ fn choose_shortcut(app: &AppHandle, spec: &str) {
 // Options that need Claude Code to feed the widget through a settings.json command.
 #[derive(Clone, Copy)]
 enum Feature {
-    Quotas,
+    Context,
     Agents,
 }
 
 impl Feature {
     fn hook(self) -> Hook {
         match self {
-            Feature::Quotas => hook::STATUS_LINE,
+            Feature::Context => hook::STATUS_LINE,
             Feature::Agents => hook::SUBAGENT_STATUS_LINE,
         }
     }
 
     fn name(self) -> &'static str {
         match self {
-            Feature::Quotas => "quotas",
+            Feature::Context => "context",
             Feature::Agents => "agents",
         }
     }
 
     fn enabled(self, settings: &Settings) -> bool {
         match self {
-            Feature::Quotas => settings.show_quotas,
+            Feature::Context => settings.show_context,
             Feature::Agents => settings.show_agents,
         }
     }
 
     fn set(self, settings: &mut Settings, on: bool) {
         match self {
-            Feature::Quotas => settings.show_quotas = on,
+            Feature::Context => settings.show_context = on,
             Feature::Agents => settings.show_agents = on,
         }
     }
@@ -605,17 +590,13 @@ fn run_cli() -> Option<i32> {
     match std::env::args().nth(1)?.as_str() {
         "--statusline" => {
             let input = read_stdin();
-            let quotas = quota::parse_status(&input);
-            if let Some(quotas) = &quotas {
-                quota::save(quotas);
-            }
             let info = info::parse_status(&input);
             if let Some((session_id, info)) = &info {
                 info::save(session_id, info);
             }
             log::event(
                 "statusline",
-                json!({ "bytes": input.len(), "quotas": quotas.is_some(),
+                json!({ "bytes": input.len(),
                         "sessionId": info.as_ref().map(|(id, _)| id),
                         "info": info.as_ref().map(|(_, i)| i) }),
             );
@@ -635,7 +616,7 @@ fn run_cli() -> Option<i32> {
             }
             Some(0)
         }
-        "--enable-quotas" => Some(enable(Feature::Quotas)),
+        "--enable-context" => Some(enable(Feature::Context)),
         "--enable-agents" => Some(enable(Feature::Agents)),
         "--remove-hooks" => Some(report(
             hook::ALL
@@ -745,7 +726,7 @@ fn main() {
             window.set_always_on_top(settings.always_on_top)?;
             window.set_ignore_cursor_events(settings.click_through)?;
             place_window(&window, &settings);
-            for feature in [Feature::Quotas, Feature::Agents] {
+            for feature in [Feature::Context, Feature::Agents] {
                 if !feature.enabled(&settings) {
                     continue;
                 }
@@ -817,7 +798,7 @@ fn main() {
                         if options.show_agents {
                             session.agents = agents::load(&session.session_id, now_secs() * 1000);
                         }
-                        if options.show_quotas {
+                        if options.show_context {
                             session.info = info::load(&session.session_id);
                         }
                     }
@@ -835,24 +816,6 @@ fn main() {
                         );
                         if enabled {
                             notify::show(&handle, &name, text);
-                        }
-                    }
-                    let now = now_secs();
-                    let quotas = quota::load(now);
-                    if let Some(figures) = tracker.quotas(&quotas) {
-                        log::event(
-                            "quotas",
-                            json!({ "shown": options.show_quotas, "figures": figures,
-                                    "rejections": limit::active(now).len() }),
-                        );
-                    }
-                    if options.notify_quota {
-                        for message in watcher.quotas(&quotas, now) {
-                            log::event(
-                                "notification",
-                                json!({ "session": "Claude usage", "text": message, "enabled": true }),
-                            );
-                            notify::show(&handle, "Claude usage", &message);
                         }
                     }
                     let snapshot = list

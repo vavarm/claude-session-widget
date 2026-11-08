@@ -43,11 +43,11 @@ try {
     Check 're-install keeps settings' (Test-Path (Join-Path $data 'settings.json'))
     Check 're-install does not leave the widget hidden for the next start' ((Get-Content (Join-Path $data 'settings.json') -Raw) -notmatch '"WidgetVisible"\s*:\s*false')
 
-    $r = Run 'install.ps1' ($common + '-Quotas', '-Agents')
+    $r = Run 'install.ps1' ($common + '-Context', '-Agents')
     $claudeSettings = Join-Path $claudeConfig 'settings.json'
-    Check 'install -Quotas registers the status line' ($r.Code -eq 0 -and (Get-Content $claudeSettings -Raw) -match 'ClaudeSessionWidget\.exe.*--statusline') $r.Output
+    Check 'install -Context registers the status line' ($r.Code -eq 0 -and (Get-Content $claudeSettings -Raw) -match 'ClaudeSessionWidget\.exe.*--statusline') $r.Output
     Check 'install -Agents registers the subagent status line' ((Get-Content $claudeSettings -Raw) -match 'subagentStatusLine')
-    Check 'install -Quotas turns the setting on' ((Get-Content (Join-Path $data 'settings.json') -Raw) -match '"ShowQuotas"\s*:\s*true')
+    Check 'install -Context turns the setting on' ((Get-Content (Join-Path $data 'settings.json') -Raw) -match '"ShowContext"\s*:\s*true')
 
     $bogus = Join-Path $work 'not-an-install'; New-Item -ItemType Directory $bogus | Out-Null
     Set-Content (Join-Path $bogus 'precious.txt') 'x'

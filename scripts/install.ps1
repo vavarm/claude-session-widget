@@ -16,8 +16,8 @@ Directory that receives the Start Menu shortcut. Defaults to the current user's 
 .PARAMETER Autostart
 Start the widget when Windows starts. Without this switch an existing autostart entry is left as is.
 
-.PARAMETER Quotas
-Show the 5-hour and weekly usage quotas. This registers the widget as Claude Code's status line
+.PARAMETER Context
+Show each session's context use, model and cost. This registers the widget as Claude Code's status line
 in ~/.claude/settings.json (an existing status line is never replaced). Can also be toggled from the tray menu.
 
 .PARAMETER Agents
@@ -32,7 +32,7 @@ param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'ClaudeSessionWidget\app'),
     [string]$StartMenuDir = [Environment]::GetFolderPath('Programs'),
     [switch]$Autostart,
-    [switch]$Quotas,
+    [switch]$Context,
     [switch]$Agents,
     [switch]$NoLaunch
 )
@@ -92,7 +92,7 @@ $link.Save()
 
 if ($Autostart) { Set-Autostart $exe }
 
-foreach ($option in @(@($Quotas, 'quotas'), @($Agents, 'agents'))) {
+foreach ($option in @(@($Context, 'context'), @($Agents, 'agents'))) {
     if ($option[0]) {
         # Piping the output makes PowerShell wait for this GUI-subsystem executable to finish.
         $message = & $exe "--enable-$($option[1])" | Out-String

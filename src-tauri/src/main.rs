@@ -539,6 +539,10 @@ fn main() {
     std::panic::set_hook(Box::new(|info| {
         log::event("panic", json!({ "message": info.to_string() }));
     }));
+    log::event(
+        "launch",
+        json!({ "version": env!("CARGO_PKG_VERSION"), "args": std::env::args().skip(1).collect::<Vec<_>>() }),
+    );
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             set_visible(app, true)
@@ -686,6 +690,11 @@ fn main() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run the widget");
+        .build(tauri::generate_context!())
+        .expect("failed to build the widget")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                log::event("exit", json!({}));
+            }
+        });
 }

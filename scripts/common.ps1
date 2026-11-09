@@ -1,7 +1,8 @@
 # Helpers shared by install.ps1, update.ps1 and uninstall.ps1.
 
 $script:RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$script:RunValue = 'ClaudeSessionWidget'
+# Same name as the entry the app's own "Start at login" writes, so both manage one entry.
+$script:RunValue = 'Claude Session Widget'
 
 # Only processes started from $installDir are stopped, so another copy (for example a dev build) is left alone.
 function Stop-Widget([string]$installDir) {

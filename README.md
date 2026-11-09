@@ -29,14 +29,22 @@ Unofficial project, not affiliated with Anthropic.
 
 ### From a release
 
-Download the archive for your platform from the Releases page, extract it and run `ClaudeSessionWidget`. Enable **Start at login** in the tray menu if you want it to launch with your session.
+Each release has, for every platform, an installer and a plain archive with the bare executable:
 
-The binaries are not code-signed:
+| Platform | Installer | Archive |
+| --- | --- | --- |
+| Windows (x64) | `…-windows-x64-setup.exe`, installs for the current user without admin rights | `…-windows-x64.zip` |
+| Linux (x64) | `…-linux-x64.deb` or `…-linux-x64.AppImage` | `…-linux-x64.tar.gz` |
+| macOS (Apple silicon, Intel) | `…-macos-arm64.dmg`, `…-macos-x64.dmg` | `…-macos-arm64.tar.gz`, `…-macos-x64.tar.gz` |
+
+Run the installer, or extract the archive and run `ClaudeSessionWidget`. Enable **Start at login** in the tray menu if you want it to launch with your session.
+
+None of them is code-signed:
 
 - Windows: SmartScreen may warn on first launch; choose "More info", then "Run anyway".
-- macOS: remove the quarantine flag once with `xattr -d com.apple.quarantine ClaudeSessionWidget`.
+- macOS: remove the quarantine flag once with `xattr -d com.apple.quarantine ClaudeSessionWidget` (on the app inside the dmg, or on the bare executable).
 
-Release archives come with `SHA256SUMS.txt`.
+Releases come with `SHA256SUMS.txt`.
 
 ### From source
 
@@ -149,7 +157,7 @@ scripts/     install, update, uninstall (PowerShell and shell)
 
 CI runs formatting, clippy and the tests on all three platforms, plus the shell installer test on Linux.
 
-**Releasing**: run the *Prepare release* workflow from the Actions tab on `main` and pick `patch`, `minor` or `major`. It requires a green CI on the commit, raises the version in `src-tauri/Cargo.toml` and `Cargo.lock`, commits `chore(release): X.Y.Z`, tags it, then builds the four binaries and publishes the release with generated notes and `SHA256SUMS.txt`. Pushing a `v*` tag by hand also publishes a release; the tag must then match the version in `src-tauri/Cargo.toml`.
+**Releasing**: run the *Prepare release* workflow from the Actions tab on `main` and pick `patch`, `minor` or `major`. It requires a green CI on the commit, raises the version in `src-tauri/Cargo.toml` and `Cargo.lock`, commits `chore(release): X.Y.Z`, tags it, then builds the binaries and installers for the four targets and publishes the release with generated notes and `SHA256SUMS.txt`. Pushing a `v*` tag by hand also publishes a release; the tag must then match the version in `src-tauri/Cargo.toml`.
 
 ## License
 

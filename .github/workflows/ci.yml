@@ -72,3 +72,40 @@ jobs:
 
       - name: Install, update and uninstall scripts
         run: tests/scripts.tests.sh
+
+  bundle:
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, bundles: nsis }
+          - { os: ubuntu-latest, bundles: "deb,appimage" }
+          - { os: macos-latest, bundles: dmg }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: bundle
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the installers
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          NO_STRIP: true
+        run: npx --yes @tauri-apps/cli@2 build --bundles ${{ matrix.bundles }}
+        working-directory: src-tauri

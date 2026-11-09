@@ -29,6 +29,16 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": ["nsis", "deb", "appimage", "dmg"],
+    "category": "DeveloperTool",
+    "shortDescription": "Always-on-top widget showing your running Claude Code sessions",
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

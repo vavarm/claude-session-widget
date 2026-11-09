@@ -33,7 +33,7 @@ Each release has, for every platform, an installer and a plain archive with the 
 
 | Platform | Installer | Archive |
 | --- | --- | --- |
-| Windows (x64) | `…-windows-x64-setup.exe`, installs for the current user without admin rights | `…-windows-x64.zip` |
+| Windows (x64) | `…-windows-x64.setup.exe`, installs for the current user without admin rights | `…-windows-x64.zip` |
 | Linux (x64) | `…-linux-x64.deb` or `…-linux-x64.AppImage` | `…-linux-x64.tar.gz` |
 | macOS (Apple silicon, Intel) | `…-macos-arm64.dmg`, `…-macos-x64.dmg` | `…-macos-arm64.tar.gz`, `…-macos-x64.tar.gz` |
 
@@ -45,6 +45,10 @@ None of them is code-signed:
 - macOS: remove the quarantine flag once with `xattr -d com.apple.quarantine ClaudeSessionWidget` (on the app inside the dmg, or on the bare executable).
 
 Releases come with `SHA256SUMS.txt`.
+
+Uninstall with the platform's usual tool (Windows: Apps settings, which removes the files, the Start Menu shortcut and the start-at-login entry). Settings and `widget.log` stay in the data folder (see [Configuration](#configuration)); delete it for a full cleanup.
+
+The installer and the source scripts use the same shortcut and start-at-login entry names, so install with one or the other, not both.
 
 ### From source
 
@@ -155,7 +159,7 @@ tests/       UI tests, Windows end-to-end test, installer script tests
 scripts/     install, update, uninstall (PowerShell and shell)
 ```
 
-CI runs formatting, clippy and the tests on all three platforms, plus the shell installer test on Linux.
+CI runs formatting, clippy and the tests on all three platforms, the shell installer test on Linux, and builds the installers on all three platforms.
 
 **Releasing**: run the *Prepare release* workflow from the Actions tab on `main` and pick `patch`, `minor` or `major`. It requires a green CI on the commit, raises the version in `src-tauri/Cargo.toml` and `Cargo.lock`, commits `chore(release): X.Y.Z`, tags it, then builds the binaries and installers for the four targets and publishes the release with generated notes and `SHA256SUMS.txt`. Pushing a `v*` tag by hand also publishes a release; the tag must then match the version in `src-tauri/Cargo.toml`.
 
@@ -175,4 +179,4 @@ Known limits on Linux and macOS:
 
 - Wayland compositors may ignore "always on top" for normal windows; X11 works.
 - GNOME needs an AppIndicator extension to show tray icons.
-- On macOS the widget is a bare binary, not an app bundle, and lives in the menu bar.
+- On macOS the widget lives in the menu bar; the dmg and the app bundle it holds are unsigned and never run by hand.

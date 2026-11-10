@@ -37,7 +37,7 @@ Each release has, for every platform, an installer and a plain archive with the 
 | Linux (x64) | `…-linux-x64.deb` or `…-linux-x64.AppImage` | `…-linux-x64.tar.gz` |
 | macOS (Apple silicon, Intel) | `…-macos-arm64.dmg`, `…-macos-x64.dmg` | `…-macos-arm64.tar.gz`, `…-macos-x64.tar.gz` |
 
-Run the installer, or extract the archive and run `ClaudeSessionWidget`. Enable **Start at login** in the tray menu if you want it to launch with your session.
+Run the installer, or extract the archive and run `ClaudeSessionWidget`. The Windows installer also sets the widget to start at login; switch it off with **Start at login** in the tray menu. With an archive, a Linux package or the dmg, enable that menu entry yourself.
 
 None of them is code-signed:
 

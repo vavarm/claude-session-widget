@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "claude-session-widget"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "dirs 7.0.0",
  "serde",

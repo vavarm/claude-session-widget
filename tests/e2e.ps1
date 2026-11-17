@@ -23,6 +23,7 @@ public class Win {
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
   [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
 }
 "@
 
@@ -56,6 +57,32 @@ function Find-Window($procId) {
         }
         $true }, [IntPtr]::Zero) | Out-Null
     if ($global:foundArea -gt 10000) { $global:foundHwnd }
+}
+
+function Is-Above($upper, $lower) {
+    $h = $lower
+    while (($h = [Win]::GetWindow($h, 3)) -ne [IntPtr]::Zero) { if ($h -eq $upper) { return $true } }
+    $false
+}
+
+# A topmost window that never takes focus, run in its own process so it keeps pumping messages.
+function Start-Blocker($x, $y, $w, $h) {
+    $path = Join-Path $work 'blocker.ps1'
+    Set-Content $path -Encoding utf8 -Value @'
+param($x, $y, $w, $h)
+Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @"
+using System.Drawing; using System.Windows.Forms;
+public class Blocker : Form {
+  public Blocker(int x, int y, int w, int h) {
+    FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
+    StartPosition = FormStartPosition.Manual; Bounds = new Rectangle(x, y, w, h);
+  }
+  protected override bool ShowWithoutActivation { get { return true; } }
+}
+"@
+[System.Windows.Forms.Application]::Run((New-Object Blocker $x, $y, $w, $h))
+'@
+    Start-Process powershell -ArgumentList '-NoProfile', '-File', $path, $x, $y, $w, $h -PassThru
 }
 
 function Get-Rect($hwnd) { $r = New-Object Win+RECT; [void][Win]::GetWindowRect($hwnd, [ref]$r); $r }
@@ -139,7 +166,7 @@ $sessions = Join-Path $work 'sessions'; $appdata = Join-Path $work 'appdata'
 New-Item -ItemType Directory $sessions, $appdata | Out-Null
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $listener.Start()
 $port = $listener.LocalEndpoint.Port; $listener.Stop()
-$dummies = @(); $app = $null; $hwnd = $null
+$dummies = @(); $app = $null; $hwnd = $null; $blocker = $null
 
 try {
     $a = New-Dummy; $b = New-Dummy; $c = New-Dummy; $dummies = @($a, $b, $c)
@@ -167,6 +194,7 @@ try {
     Check 'menu: compact toggles back' ((Click-Menu 'compact') -and (Wait-Until { -not (Page-State).compact }) -and (Wait-Until { Height-Is $hwnd 3 }) -and -not (Read-Settings).Compact)
     Check 'menu: opacity 60 %' ((Click-Menu 'opacity_60') -and (Wait-Until { [Math]::Abs((Read-Settings).Opacity - 0.6) -lt 0.01 }) -and (Wait-Until { (Cdp-Eval "document.getElementById('card').style.getPropertyValue('--opacity')") -eq '0.6' }))
     Check 'menu: always-on-top off' ((Click-Menu 'top') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 8) -eq 0 }) -and -not (Read-Settings).AlwaysOnTop)
+    Check 'menu: always-on-top back on' ((Click-Menu 'top') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 8) -ne 0 }) -and (Read-Settings).AlwaysOnTop)
 
     # Claude Code's own records: the conversation of bravo, and the subagents it started.
     $project = Join-Path $env:CLAUDE_CONFIG_DIR 'projects\p1'
@@ -254,9 +282,29 @@ try {
     Start-Sleep -Seconds 2
     Check 'hidden state restored after restart' (-not (Find-Window $app.Id))
     Check 'widget process is still running while hidden' (-not $app.HasExited)
+
+    $blocker = Start-Blocker 300 100 500 400
+    $blockerHwnd = Wait-Until { Find-Window $blocker.Id } 15
+    Check 'blocker window covers the widget and is topmost' ($blockerHwnd -and ([Win]::GetWindowLong($blockerHwnd, -20) -band 8) -ne 0)
+    Cdp-Connect $port
+    [void](Wait-Until { Cdp-Eval "!!window.__TAURI__ && !!document.querySelector('.head')" } 15)
+    [void](Click-Menu 'show')
+    $hwnd = Wait-Until { Find-Window $app.Id } 5
+    Check 'menu: show brings the widget above windows raised while it was hidden' ($hwnd -and (Wait-Until { -not (Is-Above $blockerHwnd $hwnd) } 3))
+
+    [void][Win]::SetWindowPos($blockerHwnd, [IntPtr](-1), 0, 0, 0, 0, 0x0001 -bor 0x0002 -bor 0x0010)
+    Check 'blocker raised over the shown widget' (Wait-Until { Is-Above $blockerHwnd $hwnd } 3)
+    # The first heartbeat comes 30 s after start.
+    $beat = Wait-Until {
+        Get-Content (Join-Path $appdata 'widget.log') | ForEach-Object { $_ | ConvertFrom-Json } |
+            Where-Object { $_.event -eq 'heartbeat' -and $_.pid -eq $app.Id } | Select-Object -Last 1
+    } 45
+    Check 'heartbeat reports the window covering the widget' ($beat -and $beat.data.visible -and $beat.data.screen.topmost -and $beat.data.screen.cloaked -eq 0 -and
+        @($beat.data.screen.coveredBy | Where-Object { $_.process -like 'powershell*' -and $_.topmost }).Count -gt 0) ($beat | ConvertTo-Json -Compress -Depth 6)
 }
 finally {
     if ($app) { Stop-Process $app -Force -ErrorAction SilentlyContinue }
+    if ($blocker) { Stop-Process $blocker -Force -ErrorAction SilentlyContinue }
     $dummies | ForEach-Object { Stop-Process $_ -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

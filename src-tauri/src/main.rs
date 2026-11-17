@@ -3,6 +3,7 @@
 mod focus;
 mod log;
 mod notify;
+mod occlusion;
 mod sessions;
 mod settings;
 mod transcript;
@@ -42,6 +43,8 @@ const SHORTCUTS: [&str; 3] = [
     "CommandOrControl+Alt+Space",
 ];
 const HEARTBEAT: Duration = Duration::from_secs(300);
+// Early beats record the screen state right after login, while other apps are still starting.
+const FIRST_HEARTBEAT: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 struct AppState {
@@ -624,6 +627,7 @@ fn main() {
                 let mut last_snapshot = String::new();
                 let mut tracker = log::Tracker::default();
                 let mut last_beat = Instant::now();
+                let mut beat_every = FIRST_HEARTBEAT;
                 let mut watcher = notify::Watcher::default();
                 loop {
                     let mut list = sessions::read(&sessions::dir());
@@ -677,12 +681,17 @@ fn main() {
                         settings.save();
                         log::event("position", json!({ "x": settings.x, "y": settings.y }));
                     }
-                    if last_beat.elapsed() >= HEARTBEAT {
+                    if last_beat.elapsed() >= beat_every {
                         last_beat = Instant::now();
+                        beat_every = (beat_every * 2).min(HEARTBEAT);
                         let visible = is_visible(&handle);
+                        let screen = main_window(&handle)
+                            .filter(|_| visible)
+                            .and_then(|w| occlusion::diagnose(&w));
                         log::event(
                             "heartbeat",
-                            json!({ "sessions": state.sessions.lock().unwrap().len(), "visible": visible }),
+                            json!({ "sessions": state.sessions.lock().unwrap().len(), "visible": visible,
+                                    "screen": screen }),
                         );
                     }
                     thread::sleep(Duration::from_secs(1));

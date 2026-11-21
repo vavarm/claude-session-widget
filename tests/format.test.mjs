@@ -33,6 +33,13 @@ test("label maps known kinds and falls back to the raw status", () => {
   assert.equal(label("unknown", ""), "Unknown");
 });
 
+test("label shows what keeps a session going after its turn", () => {
+  assert.equal(label("background", "idle", "2 tasks, 1 agent"), "Background: 2 tasks, 1 agent");
+  assert.equal(label("background", "idle"), "Background");
+  assert.equal(label("limited", "idle", "resets 9:30pm (Europe/Paris)"), "Limit reached, resets 9:30pm (Europe/Paris)");
+  assert.equal(label("limited", "idle", ""), "Limit reached");
+});
+
 test("folderName handles both separators and trailing slashes", () => {
   assert.equal(folderName("C:\\work\\my-repo\\"), "my-repo");
   assert.equal(folderName("/home/me/proj/"), "proj");
@@ -96,6 +103,8 @@ test("layout collapses to the header only while nothing runs and the pointer is 
   assert.equal(layout(quiet, true, NOW).collapsed, false);
   assert.equal(layout(withState([live("busy")], { autoCollapse: true }), false, NOW).collapsed, false);
   assert.equal(layout(withState([live("attention")], { autoCollapse: true }), false, NOW).collapsed, false);
+  assert.equal(layout(withState([live("background")], { autoCollapse: true }), false, NOW).collapsed, false);
+  assert.equal(layout(withState([live("limited")], { autoCollapse: true }), false, NOW).collapsed, true);
   assert.equal(layout(withState([live("idle")]), false, NOW).collapsed, false);
 });
 

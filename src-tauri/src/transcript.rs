@@ -126,6 +126,114 @@ pub fn info(path: &Path) -> Option<Info> {
     info
 }
 
+// What the transcript tells beyond the status Claude Code reports: background tasks it has not
+// heard back from, and a turn that ended on a usage limit.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Activity {
+    // Task id and start time, in ms.
+    pub background: Vec<(String, i64)>,
+    // The reset part of the limit message, such as "resets 9:30pm (Europe/Paris)".
+    pub limit: Option<String>,
+}
+
+impl Activity {
+    // Background shells die with Claude Code, so tasks started before the current process are gone.
+    pub fn background_since(&self, started_ms: i64) -> usize {
+        self.background
+            .iter()
+            .filter(|(_, at)| *at >= started_ms)
+            .count()
+    }
+
+    fn read_line(&mut self, line: &str) {
+        if line.contains("\"backgroundTaskId\"") {
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                let id = value
+                    .pointer("/toolUseResult/backgroundTaskId")
+                    .and_then(Value::as_str);
+                if let Some(id) = id {
+                    let at = value
+                        .get("timestamp")
+                        .and_then(Value::as_str)
+                        .and_then(crate::log::parse_iso)
+                        .unwrap_or(0);
+                    self.background.retain(|(known, _)| known != id);
+                    self.background.push((id.to_string(), at));
+                }
+            }
+        }
+        for notice in line.split("<task-notification>").skip(1) {
+            let field = |tag: &str| {
+                let (_, rest) = notice.split_once(&format!("<{tag}>"))?;
+                Some(rest.split_once(&format!("</{tag}>"))?.0)
+            };
+            if let (Some(id), status) = (field("task-id"), field("status")) {
+                if status != Some("running") {
+                    self.background.retain(|(known, _)| known != id);
+                }
+            }
+        }
+        if line.contains("\"type\":\"assistant\"") {
+            self.limit = if line.contains("\"error\":\"rate_limit\"") {
+                serde_json::from_str::<Value>(line)
+                    .ok()
+                    .filter(|v| v.get("error").and_then(Value::as_str) == Some("rate_limit"))
+                    .map(|v| limit_text(&v))
+            } else {
+                None
+            };
+        }
+    }
+}
+
+fn limit_text(value: &Value) -> String {
+    let text: String = value
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .collect();
+    text.split_once("resets ")
+        .map(|(_, reset)| format!("resets {}", reset.trim()))
+        .unwrap_or_default()
+}
+
+// Reads only what was appended since the last call; a transcript can be many megabytes.
+pub fn activity(path: &Path) -> Activity {
+    struct Scan {
+        offset: u64,
+        activity: Activity,
+    }
+    static CACHE: Mutex<Option<HashMap<PathBuf, Scan>>> = Mutex::new(None);
+    let Ok(mut file) = fs::File::open(path) else {
+        return Activity::default();
+    };
+    let len = file.metadata().map_or(0, |m| m.len());
+    let mut guard = CACHE.lock().unwrap();
+    let scan = guard
+        .get_or_insert_with(HashMap::new)
+        .entry(path.to_path_buf())
+        .or_insert(Scan {
+            offset: 0,
+            activity: Activity::default(),
+        });
+    if len < scan.offset {
+        scan.offset = 0;
+        scan.activity = Activity::default();
+    }
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(scan.offset)).is_ok() && file.read_to_end(&mut bytes).is_ok() {
+        // A line still being written is left for the next call.
+        let complete = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+        for line in String::from_utf8_lossy(&bytes[..complete]).lines() {
+            scan.activity.read_line(line);
+        }
+        scan.offset += complete as u64;
+    }
+    scan.activity.clone()
+}
+
 fn task_from(meta: &Path, now: SystemTime) -> Option<Task> {
     let value: Value = serde_json::from_str(&fs::read_to_string(meta).ok()?).ok()?;
     if value.get("finished").and_then(Value::as_bool) == Some(true) {
@@ -218,6 +326,97 @@ mod tests {
         assert!(find(&root, "abc-1").is_some());
         assert!(find(&root, "missing").is_none());
         assert!(find(&root, "../abc-1").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn started(id: &str, at: &str) -> String {
+        format!(
+            r#"{{"type":"user","timestamp":"{at}","toolUseResult":{{"stdout":"","backgroundTaskId":"{id}"}}}}"#
+        )
+    }
+
+    fn notified(id: &str, status: &str) -> String {
+        format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"<task-notification>\n<task-id>{id}</task-id>\n<status>{status}</status>\n</task-notification>"}}}}"#
+        )
+    }
+
+    const LIMIT: &str = r#"{"type":"assistant","error":"rate_limit","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"You've hit your 5-hour limit · resets 9:30pm (Europe/Paris)"}]}}"#;
+
+    fn scan(lines: &[String]) -> Activity {
+        let mut activity = Activity::default();
+        lines.iter().for_each(|line| activity.read_line(line));
+        activity
+    }
+
+    #[test]
+    fn a_background_task_runs_until_it_is_notified() {
+        let activity = scan(&[
+            started("a1", "2026-11-21T21:26:34.991Z"),
+            started("b2", "2026-11-21T21:27:00.000Z"),
+            notified("a1", "completed"),
+            notified("b2", "running"),
+        ]);
+        let ids: Vec<&str> = activity
+            .background
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(ids, ["b2"]);
+        assert!(scan(&[
+            started("c3", "2026-11-21T21:26:34Z"),
+            notified("c3", "killed")
+        ])
+        .background
+        .is_empty());
+    }
+
+    #[test]
+    fn tasks_from_an_earlier_claude_code_process_do_not_count() {
+        let activity = scan(&[
+            started("old", "2026-11-21T10:00:00.000Z"),
+            started("new", "2026-11-21T21:00:00.000Z"),
+        ]);
+        let process_start = crate::log::parse_iso("2026-11-21T20:00:00.000Z").unwrap();
+        assert_eq!(activity.background_since(process_start), 1);
+    }
+
+    #[test]
+    fn a_turn_ending_on_a_usage_limit_is_remembered_until_the_next_answer() {
+        let activity = scan(&[ASSISTANT.to_string(), LIMIT.to_string()]);
+        assert_eq!(
+            activity.limit.as_deref(),
+            Some("resets 9:30pm (Europe/Paris)")
+        );
+        assert_eq!(
+            scan(&[LIMIT.to_string(), ASSISTANT.to_string()]).limit,
+            None
+        );
+        let quoted = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"{\"error\":\"rate_limit\"}"}]}}"#;
+        assert_eq!(scan(&[LIMIT.to_string(), quoted.to_string()]).limit, None);
+    }
+
+    #[test]
+    fn activity_reads_appended_lines_and_waits_for_unfinished_ones() {
+        let root = scratch("activity");
+        let path = root.join("s.jsonl");
+        fs::write(
+            &path,
+            format!("{}\n", started("a1", "2026-11-21T21:26:34Z")),
+        )
+        .unwrap();
+        assert_eq!(activity(&path).background.len(), 1);
+
+        let line = notified("a1", "completed");
+        let (head, rest) = line.split_at(line.len() / 2);
+        let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        std::io::Write::write_all(&mut file, head.as_bytes()).unwrap();
+        assert_eq!(activity(&path).background.len(), 1);
+        std::io::Write::write_all(&mut file, format!("{rest}\n").as_bytes()).unwrap();
+        assert!(activity(&path).background.is_empty());
+
+        fs::write(&path, format!("{LIMIT}\n")).unwrap();
+        assert!(activity(&path).limit.is_some());
         let _ = fs::remove_dir_all(&root);
     }
 

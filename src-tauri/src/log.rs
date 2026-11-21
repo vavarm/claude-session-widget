@@ -42,6 +42,34 @@ pub fn iso(ms: i64) -> String {
     )
 }
 
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let yoe = year - era * 400;
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+// Reads the UTC timestamps Claude Code writes, such as 2026-11-21T21:26:34.991Z.
+pub fn parse_iso(text: &str) -> Option<i64> {
+    let num = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
+    if text.get(4..5)? != "-" || text.get(10..11)? != "T" {
+        return None;
+    }
+    let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (hour, minute, second) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    let millis = match text.get(19..20) {
+        Some(".") => num(20..23).unwrap_or(0),
+        _ => 0,
+    };
+    Some(
+        days_from_civil(year, month, day) * 86_400_000
+            + ((hour * 60 + minute) * 60 + second) * 1000
+            + millis,
+    )
+}
+
 fn append(path: &Path, line: &str) {
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
@@ -176,7 +204,9 @@ mod tests {
             cwd: "C:/w".into(),
             status: status.into(),
             kind,
+            detail: String::new(),
             since_ms: 0,
+            started_ms: 0,
             agents: Vec::new(),
             info: None,
         }
@@ -191,6 +221,16 @@ mod tests {
         assert_eq!(iso(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(iso(1_794_153_600_123), "2026-11-08T16:00:00.123Z");
         assert_eq!(iso(951_782_400_000), "2000-02-29T00:00:00.000Z");
+    }
+
+    #[test]
+    fn parse_iso_reads_back_what_iso_writes() {
+        for ms in [0, 951_782_400_000, 1_794_153_600_123, 1_795_296_394_991] {
+            assert_eq!(parse_iso(&iso(ms)), Some(ms));
+        }
+        assert_eq!(parse_iso("2026-11-21T21:26:34Z"), Some(1_795_296_394_000));
+        assert_eq!(parse_iso("not a date"), None);
+        assert_eq!(parse_iso(""), None);
     }
 
     #[test]

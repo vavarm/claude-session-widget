@@ -225,6 +225,21 @@ try {
     Check 'a finished subagent disappears' (Wait-Until { (Cdp-Eval "document.querySelectorAll('.agent').length") -eq 1 })
     Check 'menu: agents off hides them' ((Click-Menu 'agents') -and (Wait-Until { (Cdp-Eval "document.querySelectorAll('.agent').length") -eq 0 }) -and (Wait-Until { Height-Is $hwnd 3 }))
 
+    # charlie is idle for Claude Code; its transcript says what still runs behind it.
+    $charlie = Join-Path $project 'sess-charlie.jsonl'
+    function Charlie-Sub { Cdp-Eval "document.querySelector('.row.$($args[0]) .sub')?.textContent ?? ''" }
+    $started = '{"type":"user","timestamp":"2026-11-21T21:26:34.991Z","toolUseResult":{"stdout":"","backgroundTaskId":"bg1"}}'
+    [IO.File]::WriteAllText($charlie, "$started`n", $utf8)
+    Check 'an idle session with a background task shows as background' (Wait-Until { (Charlie-Sub 'background') -like 'Background: 1 task*' }) "rows=$((Page-State).rows -join ',')"
+    $done = '{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"}}'
+    [IO.File]::AppendAllText($charlie, "$done`n", $utf8)
+    Check 'it is idle again once the task reports back' (Wait-Until { (Page-State).rows -join ',' -eq 'attention,busy,idle' })
+    $limit = '{"type":"assistant","error":"rate_limit","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"You''ve hit your weekly limit - resets 10am (Europe/Paris)"}]}}'
+    [IO.File]::AppendAllText($charlie, "$limit`n", $utf8)
+    Check 'a session stopped by a usage limit says so' (Wait-Until { (Charlie-Sub 'limited') -like 'Limit reached, resets 10am*' }) "rows=$((Page-State).rows -join ',')"
+    Remove-Item $charlie
+    Check 'without a transcript it is plain idle again' (Wait-Until { (Page-State).rows -join ',' -eq 'attention,busy,idle' })
+
     Check 'menu: lock position is saved and reaches the page' ((Click-Menu 'locked') -and (Wait-Until { (Read-Settings).Locked }))
     [void](Click-Menu 'locked')
     Check 'menu: click-through lets mouse events pass' ((Click-Menu 'click_through') -and (Wait-Until { ([Win]::GetWindowLong($hwnd, -20) -band 0x20) -ne 0 }) -and (Read-Settings).ClickThrough)
@@ -284,7 +299,7 @@ try {
     Check 'widget process is still running while hidden' (-not $app.HasExited)
 
     $blocker = Start-Blocker 300 100 500 400
-    $blockerHwnd = Wait-Until { Find-Window $blocker.Id } 15
+    $blockerHwnd = Wait-Until { Find-Window $blocker.Id } 30
     Check 'blocker window covers the widget and is topmost' ($blockerHwnd -and ([Win]::GetWindowLong($blockerHwnd, -20) -band 8) -ne 0)
     Cdp-Connect $port
     [void](Wait-Until { Cdp-Eval "!!window.__TAURI__ && !!document.querySelector('.head')" } 15)

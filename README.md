@@ -22,6 +22,8 @@ Unofficial project, not affiliated with Anthropic.
 | --- | --- |
 | Red | Needs you (waiting for input or a permission) |
 | Orange | Busy |
+| Hollow orange | Background: the turn is over but background tasks or subagents still run |
+| Violet | Limit reached: the last turn hit a usage limit, with its reset time |
 | Green | Idle |
 | Grey | Unknown status |
 
@@ -133,7 +135,7 @@ Claude Code writes one JSON file per live session (pid, name, working directory,
 
 A session file can outlive a crashed process, so a session is only listed if its pid is alive. On Windows its process start time must also match the file, which rules out recycled pids.
 
-Status mapping: `busy` and `idle` are known values; a status containing `wait`, `input`, `permission` or `approval` means the session needs you; anything else is shown as unknown. Only `busy` and `idle` have been observed so far, so the "needs you" detection is a best guess.
+Status mapping: `busy` and `idle` are known values; a status containing `wait`, `input`, `permission` or `approval` means the session needs you; anything else is shown as unknown. Only `busy` and `idle` have been observed so far, so the "needs you" detection is a best guess. An `idle` session is refined from its transcript: background tasks that have not reported back, or subagents still running, make it Background; a turn that ended on a `rate_limit` error makes it Limit reached until the next answer.
 
 ## Development
 

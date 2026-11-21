@@ -32,11 +32,13 @@ export function elapsed(sinceMs, now = Date.now()) {
   return `${Math.floor(hours / 24)}d`;
 }
 
-export function label(kind, raw) {
+export function label(kind, raw, detail = "") {
   switch (kind) {
     case "busy": return "Busy";
     case "idle": return "Idle";
     case "attention": return "Needs you";
+    case "background": return detail ? `Background: ${detail}` : "Background";
+    case "limited": return detail ? `Limit reached, ${detail}` : "Limit reached";
     default: return raw || "Unknown";
   }
 }
@@ -63,7 +65,7 @@ export function layout(state, hover, now = Date.now()) {
   const { sessions, compact, foldIdle, autoCollapse, notice } = state;
   const folded = foldIdle ? sessions.filter((s) => s.kind === "idle" && now - s.sinceMs > FOLD_AFTER_MS) : [];
   const shown = sessions.filter((s) => !folded.includes(s));
-  const quiet = sessions.every((s) => s.kind !== "busy" && s.kind !== "attention");
+  const quiet = sessions.every((s) => !["busy", "background", "attention"].includes(s.kind));
   const collapsed = Boolean(autoCollapse) && quiet && !hover;
   const extra = (notice ? NOTE_HEIGHT : 0) + (folded.length ? FOLDED_HEIGHT : 0);
   const height = collapsed

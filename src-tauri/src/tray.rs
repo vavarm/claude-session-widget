@@ -11,8 +11,10 @@ pub fn color(sessions: &[Session]) -> [u8; 3] {
     let any = |kind| sessions.iter().any(|s| s.kind == kind);
     if any(Kind::Attention) {
         [248, 81, 73]
-    } else if any(Kind::Busy) {
+    } else if any(Kind::Busy) || any(Kind::Background) {
         [245, 165, 36]
+    } else if any(Kind::Limited) {
+        [163, 113, 247]
     } else if sessions.is_empty() {
         [130, 130, 140]
     } else {

@@ -16,7 +16,7 @@ const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
 
 const card = document.getElementById("card");
-const COUNT_ORDER = ["attention", "busy", "idle"];
+const COUNT_ORDER = ["attention", "busy", "background", "limited", "idle"];
 let state = { sessions: [], compact: false, opacity: 0.9, locked: false, notice: null };
 let hover = false;
 let lastHeight = 0;
@@ -34,7 +34,7 @@ function rowHtml(s, compact) {
           <i class="dot"></i>
           <div>
             <div class="name">${escapeHtml(s.name)}${badge}</div>
-            <div class="sub">${escapeHtml(label(s.kind, s.status))} · ${escapeHtml(folderName(s.cwd))}</div>${lines}
+            <div class="sub">${escapeHtml(label(s.kind, s.status, s.detail))} · ${escapeHtml(folderName(s.cwd))}</div>${lines}
           </div>
           <div class="time">${elapsed(s.sinceMs)}</div>${bar}
         </div>`;

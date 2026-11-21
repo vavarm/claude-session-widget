@@ -503,7 +503,7 @@ fn update_tray(app: &AppHandle) {
     let mut tooltip = format!(
         "Claude: {} session(s), {} busy",
         sessions.len(),
-        count(Kind::Busy)
+        count(Kind::Busy) + count(Kind::Background)
     );
     if count(Kind::Attention) > 0 {
         tooltip += &format!(", {} need you", count(Kind::Attention));
@@ -632,20 +632,21 @@ fn main() {
                 loop {
                     let mut list = sessions::read(&sessions::dir());
                     let options = handle.state::<AppState>().settings.lock().unwrap().clone();
-                    if options.show_agents || options.show_context {
-                        let projects = transcript::projects_dir();
-                        for session in &mut list {
-                            let Some(path) = transcript::find(&projects, &session.session_id) else {
-                                continue;
-                            };
-                            if options.show_agents {
-                                session.agents = transcript::agents(&path);
-                            }
-                            if options.show_context {
-                                session.info = transcript::info(&path);
-                            }
+                    let projects = transcript::projects_dir();
+                    for session in &mut list {
+                        let Some(path) = transcript::find(&projects, &session.session_id) else {
+                            continue;
+                        };
+                        let agents = transcript::agents(&path);
+                        sessions::refine(session, &transcript::activity(&path), agents.len());
+                        if options.show_agents {
+                            session.agents = agents;
+                        }
+                        if options.show_context {
+                            session.info = transcript::info(&path);
                         }
                     }
+                    sessions::sort(&mut list);
                     for (kind, data) in tracker.sessions(&list) {
                         log::event(kind, data);
                     }

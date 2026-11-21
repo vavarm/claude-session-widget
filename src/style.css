@@ -7,6 +7,8 @@
   --muted: #8e8e9a;
   --attention: #f85149;
   --busy: #f5a524;
+  --background: #f5a524;
+  --limited: #a371f7;
   --idle: #3fb950;
   --unknown: #82828c;
   --header: 34px;
@@ -93,9 +95,13 @@ html, body {
 .busy { --c: var(--busy); }
 .idle { --c: var(--idle); }
 .attention { --c: var(--attention); }
+.background { --c: var(--background); }
+.limited { --c: var(--limited); }
 .unknown { --c: var(--unknown); }
 
 .busy .dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 36%, transparent); }
+/* Hollow: the session works on without taking a turn. */
+.background .dot { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
 
 .name, .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name { font-size: 12.5px; line-height: 17px; font-weight: 600; }

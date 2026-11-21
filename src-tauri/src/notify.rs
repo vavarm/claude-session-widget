@@ -25,7 +25,7 @@ impl Watcher {
                 match (previous.get(&session.pid), session.kind) {
                     (Some(Kind::Attention), _) => {}
                     (_, Kind::Attention) => events.push((Reason::NeedsYou, session.name.clone())),
-                    (Some(Kind::Busy), Kind::Idle) => {
+                    (Some(Kind::Busy | Kind::Background), Kind::Idle) => {
                         events.push((Reason::Finished, session.name.clone()))
                     }
                     _ => {}
@@ -53,7 +53,9 @@ mod tests {
             cwd: String::new(),
             status: String::new(),
             kind,
+            detail: String::new(),
             since_ms: 0,
+            started_ms: 0,
             agents: Vec::new(),
             info: None,
         }
@@ -84,6 +86,26 @@ mod tests {
         watcher.sessions(&[session(1, "a", Kind::Busy), session(2, "b", Kind::Idle)]);
         let events = watcher.sessions(&[session(1, "a", Kind::Idle), session(2, "b", Kind::Idle)]);
         assert_eq!(events, vec![(Reason::Finished, "a".to_string())]);
+    }
+
+    #[test]
+    fn work_left_in_the_background_finishes_when_it_ends() {
+        let mut watcher = Watcher::default();
+        watcher.sessions(&[session(1, "a", Kind::Busy)]);
+        assert!(watcher
+            .sessions(&[session(1, "a", Kind::Background)])
+            .is_empty());
+        let events = watcher.sessions(&[session(1, "a", Kind::Idle)]);
+        assert_eq!(events, vec![(Reason::Finished, "a".to_string())]);
+    }
+
+    #[test]
+    fn hitting_a_usage_limit_is_not_a_finish() {
+        let mut watcher = Watcher::default();
+        watcher.sessions(&[session(1, "a", Kind::Busy)]);
+        assert!(watcher
+            .sessions(&[session(1, "a", Kind::Limited)])
+            .is_empty());
     }
 
     #[test]

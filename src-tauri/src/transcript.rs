@@ -162,6 +162,22 @@ impl Activity {
                 }
             }
         }
+        // A task stopped with TaskStop gets no task notification, only the tool's own result.
+        if line.contains("Successfully stopped task") {
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                let result = value.get("toolUseResult");
+                let stopped = result
+                    .and_then(|r| r.get("message"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|m| m.starts_with("Successfully stopped task"));
+                let id = result
+                    .and_then(|r| r.get("task_id"))
+                    .and_then(Value::as_str);
+                if let (true, Some(id)) = (stopped, id) {
+                    self.background.retain(|(known, _)| known != id);
+                }
+            }
+        }
         for notice in line.split("<task-notification>").skip(1) {
             let field = |tag: &str| {
                 let (_, rest) = notice.split_once(&format!("<{tag}>"))?;
@@ -379,6 +395,31 @@ mod tests {
         ]);
         let process_start = crate::log::parse_iso("2026-11-21T20:00:00.000Z").unwrap();
         assert_eq!(activity.background_since(process_start), 1);
+    }
+
+    fn stop_result(id: &str, message: &str) -> String {
+        format!(
+            r#"{{"type":"user","toolUseResult":{{"message":"{message}","task_id":"{id}","task_type":"local_bash"}}}}"#
+        )
+    }
+
+    #[test]
+    fn a_task_stopped_with_task_stop_no_longer_runs() {
+        let activity = scan(&[
+            started("a1", "2026-11-22T17:17:59Z"),
+            started("b2", "2026-11-22T17:20:00Z"),
+            started("c3", "2026-11-22T17:21:00Z"),
+            stop_result("a1", "Successfully stopped task: a1 (sleep 600)"),
+            stop_result("b2", "No task found with ID: b2"),
+            r#"{"type":"user","toolUseResult":{"stdout":"Successfully stopped task: c3"}}"#
+                .to_string(),
+        ]);
+        let ids: Vec<&str> = activity
+            .background
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(ids, ["b2", "c3"]);
     }
 
     #[test]

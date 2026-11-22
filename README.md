@@ -2,9 +2,9 @@
 
 A small always-on-top widget that shows your running [Claude Code](https://claude.com/claude-code) sessions: which ones are working, which are idle, and which are waiting for you.
 
-![The widget showing four sessions](docs/screenshot.png)
+![The widget showing five sessions, one in each state](docs/screenshot.png)
 
-- One row per live session: name, project folder, state, time spent in that state.
+- One row per live session: name, project folder, state, time spent in that state. A session whose turn is over but whose background tasks or subagents still run, or that stopped on a usage limit, says so instead of showing as idle.
 - Sessions that need you come first. The tray icon takes the colour of the most urgent one.
 - The tray icon is the app icon with a dot in the colour of the most urgent state. Its menu covers show/hide, always on top, compact mode, opacity and start at login.
 - Double-click a session to bring its terminal or editor window to the front (the project folder opens if no window is found).
@@ -89,7 +89,7 @@ Double-clicking a session looks for the window of the terminal or editor that st
 Layout options in the tray menu:
 
 - **Fold sessions idle for an hour** replaces them with a single "+N idle" line.
-- **Collapse when nothing is running** shrinks the widget to its header while no session is busy or waiting; hovering it expands it again.
+- **Collapse when nothing is running** shrinks the widget to its header while no session is busy, working in the background or waiting; hovering it expands it again.
 - **Show/hide shortcut** registers a global shortcut (Ctrl+Alt+C, Ctrl+Alt+W or Ctrl+Alt+Space; Cmd on macOS). If another application already owns it, the widget says so.
 
 Placement options in the tray menu:
@@ -109,9 +109,9 @@ Both read the transcripts Claude Code keeps in `~/.claude/projects` (`$CLAUDE_CO
 
 - The context is the size of the last request of the conversation. The transcript does not say how large the model's window is, so it is measured against 200k tokens, or against 1M once the conversation has gone past 200k. Treat it as an estimate.
 - A subagent counts as running until its record says it finished; one that has written nothing for 15 minutes is taken for a crashed one and dropped.
-- Background shell commands are not shown: Claude Code does not record them with the subagents.
+- Background shell commands are not listed under their session, but they count towards its Background state until Claude Code reports them done.
 
-**Notifications** (tray menu only) can be switched on separately for a session that needs you and for a session that finishes (busy to idle). They are system notifications and never replay what was already true when you turn them on. Whether "needs you" ever fires depends on the status values Claude Code writes, of which only `busy` and `idle` have been observed.
+**Notifications** (tray menu only) can be switched on separately for a session that needs you and for a session that finishes (busy to idle, or once its background work is over). Reaching a usage limit does not notify. They are system notifications and never replay what was already true when you turn them on. Whether "needs you" ever fires depends on the status values Claude Code writes, of which only `busy` and `idle` have been observed.
 
 ## Configuration
 
